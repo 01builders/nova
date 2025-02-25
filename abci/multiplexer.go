@@ -6,7 +6,6 @@ import (
 	"path/filepath"
 	"sync"
 
-	"github.com/01builders/nova/appd"
 	"github.com/spf13/viper"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
@@ -16,6 +15,8 @@ import (
 	dbm "github.com/cosmos/cosmos-db"
 	"github.com/cosmos/cosmos-sdk/server"
 	servertypes "github.com/cosmos/cosmos-sdk/server/types"
+
+	"github.com/01builders/nova/appd"
 )
 
 const LastestVersion = "latest"
@@ -46,7 +47,7 @@ func NewMultiplexer(latestApp servertypes.ABCI, versions map[string]Version, v *
 	// connect to each app
 	for name, v := range versions {
 		conn, err := grpc.Dial(v.GRPCAddress,
-			grpc.WithTransportCredentials(insecure.NewCredentials()),
+			grpc.WithTransportCredentials(insecure.NewCredentials()), // localhost so expecting unsecure
 		)
 		if err != nil {
 			return nil, fmt.Errorf("failed to connect to version %s at %s: %w", name, v.GRPCAddress, err)
