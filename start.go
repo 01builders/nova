@@ -90,7 +90,7 @@ func startStandAlone(versions map[string]abci.Version, svrCtx *server.Context, s
 	addr := svrCtx.Viper.GetString(flagAddress)
 	transport := svrCtx.Viper.GetString(flagTransport)
 
-	cmtApp, err := abci.NewMultiplexer(app, versions)
+	cmtApp, err := abci.NewMultiplexer(app, versions, svrCtx.Viper, svrCtx.Config.RootDir)
 	if err != nil {
 		return err
 	}
@@ -211,7 +211,7 @@ func startCmtNode(
 		return nil, cleanupFn, err
 	}
 
-	cmtApp, err := abci.NewMultiplexer(app, versions)
+	cmtApp, err := abci.NewMultiplexer(app, versions, svrCtx.Viper, svrCtx.Config.RootDir)
 	if err != nil {
 		return nil, cleanupFn, err
 	}
