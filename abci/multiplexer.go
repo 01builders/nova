@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"sync"
 
+	"github.com/01builders/nova/appd"
 	"github.com/spf13/viper"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
@@ -22,7 +23,7 @@ const LastestVersion = "latest"
 // Version defines the configuration for remote apps
 type Version struct {
 	Height      int64
-	BinaryPath  string
+	Appd        appd.Appd
 	GRPCAddress string
 }
 
@@ -83,7 +84,7 @@ func (m *multiplexer) getAppForHeight(height int64) servertypes.ABCI {
 	for name, v := range m.versions {
 		if height <= v.Height {
 			latestVersion = name
-			break
+			// we do not break, as we must check for all versions
 		}
 	}
 
