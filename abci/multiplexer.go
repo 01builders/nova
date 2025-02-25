@@ -67,7 +67,9 @@ func (m *multiplexer) getLatestHeight(rootDir string, v *viper.Viper) (int64, er
 		return 0, err
 	}
 
-	return rootmulti.GetLatestVersion(db), db.Close()
+	height := rootmulti.GetLatestVersion(db)
+
+	return height, db.Close()
 }
 
 // Helper to get the appropriate app based on height
