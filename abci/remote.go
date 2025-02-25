@@ -5,85 +5,86 @@ import (
 
 	"google.golang.org/grpc"
 
-	"github.com/cometbft/cometbft/abci/types"
+	abci "github.com/cometbft/cometbft/abci/types"
 )
 
 type RemoteABCIClient struct {
-	conn *grpc.ClientConn
+	abci.ABCIClient
 }
 
 // NewRemoteABCIClient returns a new ABCI Client.
 // This gRPC client connects to cometbft via grpc.
 func NewRemoteABCIClient(conn *grpc.ClientConn) *RemoteABCIClient {
-	return &RemoteABCIClient{conn: conn}
+	return &RemoteABCIClient{ABCIClient: abci.NewABCIClient(conn)}
 }
 
-// ApplySnapshotChunk implements types.ABCI.
-func (a *RemoteABCIClient) ApplySnapshotChunk(req *types.RequestApplySnapshotChunk) (*types.ResponseApplySnapshotChunk, error) {
-	panic("unimplemented")
+// ApplySnapshotChunk implements abci.ABCI.
+func (a *RemoteABCIClient) ApplySnapshotChunk(req *abci.RequestApplySnapshotChunk) (*abci.ResponseApplySnapshotChunk, error) {
+	return a.ABCIClient.ApplySnapshotChunk(context.Background(), req, grpc.WaitForReady(true))
 }
 
-// CheckTx implements types.ABCI.
-func (a *RemoteABCIClient) CheckTx(req *types.RequestCheckTx) (*types.ResponseCheckTx, error) {
-	panic("unimplemented")
+// CheckTx implements abci.ABCI.
+func (a *RemoteABCIClient) CheckTx(req *abci.RequestCheckTx) (*abci.ResponseCheckTx, error) {
+	return a.ABCIClient.CheckTx(context.Background(), req, grpc.WaitForReady(true))
 }
 
-// Commit implements types.ABCI.
-func (a *RemoteABCIClient) Commit() (*types.ResponseCommit, error) {
-	panic("unimplemented")
+// Commit implements abci.ABCI.
+func (a *RemoteABCIClient) Commit() (*abci.ResponseCommit, error) {
+	return a.ABCIClient.Commit(context.Background(), &abci.RequestCommit{}, grpc.WaitForReady(true))
 }
 
-// ExtendVote implements types.ABCI.
-func (a *RemoteABCIClient) ExtendVote(ctx context.Context, req *types.RequestExtendVote) (*types.ResponseExtendVote, error) {
-	panic("unimplemented")
+// ExtendVote implements abci.ABCI.
+func (a *RemoteABCIClient) ExtendVote(ctx context.Context, req *abci.RequestExtendVote) (*abci.ResponseExtendVote, error) {
+	return a.ABCIClient.ExtendVote(ctx, req, grpc.WaitForReady(true))
 }
 
-// FinalizeBlock implements types.ABCI.
-func (a *RemoteABCIClient) FinalizeBlock(req *types.RequestFinalizeBlock) (*types.ResponseFinalizeBlock, error) {
-	panic("unimplemented")
+// FinalizeBlock implements abci.ABCI.
+func (a *RemoteABCIClient) FinalizeBlock(req *abci.RequestFinalizeBlock) (*abci.ResponseFinalizeBlock, error) {
+	return a.ABCIClient.FinalizeBlock(context.Background(), req, grpc.WaitForReady(true))
 }
 
-// Info implements types.ABCI.
-func (a *RemoteABCIClient) Info(req *types.RequestInfo) (*types.ResponseInfo, error) {
-	panic("unimplemented")
+// Info implements abci.ABCI.
+func (a *RemoteABCIClient) Info(req *abci.RequestInfo) (*abci.ResponseInfo, error) {
+	return a.ABCIClient.Info(context.Background(), req, grpc.WaitForReady(true))
 }
 
-// InitChain implements types.ABCI.
-func (a *RemoteABCIClient) InitChain(req *types.RequestInitChain) (*types.ResponseInitChain, error) {
-	panic("unimplemented")
+// InitChain implements abci.ABCI.
+func (a *RemoteABCIClient) InitChain(req *abci.RequestInitChain) (*abci.ResponseInitChain, error) {
+	return a.ABCIClient.InitChain(context.Background(), req, grpc.WaitForReady(true))
 }
 
-// ListSnapshots implements types.ABCI.
-func (a *RemoteABCIClient) ListSnapshots(req *types.RequestListSnapshots) (*types.ResponseListSnapshots, error) {
-	panic("unimplemented")
+// ListSnapshots implements abci.ABCI.
+func (a *RemoteABCIClient) ListSnapshots(req *abci.RequestListSnapshots) (*abci.ResponseListSnapshots, error) {
+	return a.ABCIClient.ListSnapshots(context.Background(), req, grpc.WaitForReady(true))
 }
 
-// LoadSnapshotChunk implements types.ABCI.
-func (a *RemoteABCIClient) LoadSnapshotChunk(req *types.RequestLoadSnapshotChunk) (*types.ResponseLoadSnapshotChunk, error) {
-	panic("unimplemented")
+// LoadSnapshotChunk implements abci.ABCI.
+func (a *RemoteABCIClient) LoadSnapshotChunk(req *abci.RequestLoadSnapshotChunk) (*abci.ResponseLoadSnapshotChunk, error) {
+	return a.ABCIClient.LoadSnapshotChunk(context.Background(), req, grpc.WaitForReady(true))
 }
 
-// OfferSnapshot implements types.ABCI.
-func (a *RemoteABCIClient) OfferSnapshot(req *types.RequestOfferSnapshot) (*types.ResponseOfferSnapshot, error) {
-	panic("unimplemented")
+// OfferSnapshot implements abci.ABCI.
+func (a *RemoteABCIClient) OfferSnapshot(req *abci.RequestOfferSnapshot) (*abci.ResponseOfferSnapshot, error) {
+	return a.ABCIClient.OfferSnapshot(context.Background(), req, grpc.WaitForReady(true))
 }
 
-// PrepareProposal implements types.ABCI.
-func (a *RemoteABCIClient) PrepareProposal(req *types.RequestPrepareProposal) (*types.ResponsePrepareProposal, error) {
-	panic("unimplemented")
+// PrepareProposal implements abci.ABCI.
+func (a *RemoteABCIClient) PrepareProposal(req *abci.RequestPrepareProposal) (*abci.ResponsePrepareProposal, error) {
+	return a.ABCIClient.PrepareProposal(context.Background(), req, grpc.WaitForReady(true))
 }
 
-// ProcessProposal implements types.ABCI.
-func (a *RemoteABCIClient) ProcessProposal(req *types.RequestProcessProposal) (*types.ResponseProcessProposal, error) {
-	panic("unimplemented")
+// ProcessProposal implements abci.ABCI.
+func (a *RemoteABCIClient) ProcessProposal(req *abci.RequestProcessProposal) (*abci.ResponseProcessProposal, error) {
+	return a.ABCIClient.ProcessProposal(context.Background(), req, grpc.WaitForReady(true))
 }
 
-// Query implements types.ABCI.
-func (a *RemoteABCIClient) Query(ctx context.Context, req *types.RequestQuery) (*types.ResponseQuery, error) {
-	panic("unimplemented")
+// Query implements abci.ABCI.
+func (a *RemoteABCIClient) Query(ctx context.Context, req *abci.RequestQuery) (*abci.ResponseQuery, error) {
+	return a.ABCIClient.Query(ctx, req, grpc.WaitForReady(true))
 }
 
-// VerifyVoteExtension implements types.ABCI.
-func (a *RemoteABCIClient) VerifyVoteExtension(req *types.RequestVerifyVoteExtension) (*types.ResponseVerifyVoteExtension, error) {
-	panic("unimplemented")
+// VerifyVoteExtension implements abci.ABCI.
+func (a *RemoteABCIClient) VerifyVoteExtension(req *abci.RequestVerifyVoteExtension) (*abci.ResponseVerifyVoteExtension, error) {
+	return a.ABCIClient.VerifyVoteExtension(context.Background(), req, grpc.WaitForReady(true))
+
 }
