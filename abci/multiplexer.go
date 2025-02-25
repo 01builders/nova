@@ -15,6 +15,8 @@ import (
 	dbm "github.com/cosmos/cosmos-db"
 	"github.com/cosmos/cosmos-sdk/server"
 	servertypes "github.com/cosmos/cosmos-sdk/server/types"
+
+	"github.com/01builders/nova/appd"
 )
 
 const LastestVersion = "latest"
@@ -22,7 +24,7 @@ const LastestVersion = "latest"
 // Version defines the configuration for remote apps
 type Version struct {
 	Height      int64
-	BinaryPath  string
+	Appd        appd.Appd
 	GRPCAddress string
 }
 
@@ -45,7 +47,7 @@ func NewMultiplexer(latestApp servertypes.ABCI, versions map[string]Version, v *
 	// connect to each app
 	for name, v := range versions {
 		conn, err := grpc.Dial(v.GRPCAddress,
-			grpc.WithTransportCredentials(insecure.NewCredentials()),
+			grpc.WithTransportCredentials(insecure.NewCredentials()), // localhost so expecting unsecure
 		)
 		if err != nil {
 			return nil, fmt.Errorf("failed to connect to version %s at %s: %w", name, v.GRPCAddress, err)
@@ -83,7 +85,7 @@ func (m *multiplexer) getAppForHeight(height int64) servertypes.ABCI {
 	for name, v := range m.versions {
 		if height <= v.Height {
 			latestVersion = name
-			break
+			// we do not break, as we must check for all versions
 		}
 	}
 

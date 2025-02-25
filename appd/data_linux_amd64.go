@@ -1,4 +1,4 @@
-package versions
+package appd
 
 import _ "embed"
 
