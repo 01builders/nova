@@ -3,12 +3,17 @@ package abci
 import (
 	"context"
 	"fmt"
+	"path/filepath"
 	"sync"
 
+	"github.com/spf13/viper"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 
+	"cosmossdk.io/store/rootmulti"
 	abci "github.com/cometbft/cometbft/abci/types"
+	dbm "github.com/cosmos/cosmos-db"
+	"github.com/cosmos/cosmos-sdk/server"
 	servertypes "github.com/cosmos/cosmos-sdk/server/types"
 )
 
@@ -17,7 +22,6 @@ const LastestVersion = "latest"
 // Version defines the configuration for remote apps
 type Version struct {
 	Height      int64
-	Version     string
 	BinaryPath  string
 	GRPCAddress string
 }
@@ -32,7 +36,7 @@ type multiplexer struct {
 }
 
 // NewMultiplexer creates a new ABCI wrapper for multiplexing
-func NewMultiplexer(latestApp servertypes.ABCI, versions map[string]Version) (abci.Application, error) {
+func NewMultiplexer(latestApp servertypes.ABCI, versions map[string]Version, v *viper.Viper, home string) (abci.Application, error) {
 	wrapper := &multiplexer{
 		latestApp: latestApp,
 		versions:  versions,
@@ -44,13 +48,28 @@ func NewMultiplexer(latestApp servertypes.ABCI, versions map[string]Version) (ab
 			grpc.WithTransportCredentials(insecure.NewCredentials()),
 		)
 		if err != nil {
-			return nil, fmt.Errorf("failed to connect to version %s at %s: %w", v.Version, v.GRPCAddress, err)
+			return nil, fmt.Errorf("failed to connect to version %s at %s: %w", name, v.GRPCAddress, err)
 		}
 
 		wrapper.conns[name] = conn
 	}
 
+	// check height from disk
+	wrapper.lastHeight, _ = wrapper.getLatestHeight(home, v) // if error assume genesis
+
 	return wrapper, nil
+}
+
+func (m *multiplexer) getLatestHeight(rootDir string, v *viper.Viper) (int64, error) {
+	dataDir := filepath.Join(rootDir, "data")
+	db, err := dbm.NewDB("application", server.GetAppDBBackend(v), dataDir)
+	if err != nil {
+		return 0, err
+	}
+
+	height := rootmulti.GetLatestVersion(db)
+
+	return height, db.Close()
 }
 
 // Helper to get the appropriate app based on height
