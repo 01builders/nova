@@ -6,8 +6,10 @@ import (
 	"compress/gzip"
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"os/exec"
+	"path/filepath"
 )
 
 const AppdStopped = -1
@@ -30,48 +32,20 @@ func New(name string, bin []byte, cfg ...CfgOption) (*Appd, error) {
 	// untar the binary.
 	gzr, err := gzip.NewReader(bytes.NewReader(bin))
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to read binary data for %s: %w", name, err)
 	}
 	defer gzr.Close()
 
-	tr := tar.NewReader(gzr)
-
-	if _, err := tr.Next(); err != nil {
-		return nil, err
-	}
-
-	binary, err := io.ReadAll(tr)
+	// create a temporary directory for extraction
+	tmpDir, err := os.MkdirTemp("", fmt.Sprintf("appd-%s-", name))
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to create temp directory: %w", err)
 	}
 
-	path, cleanup, err := saveBytesTemp(binary, fmt.Sprintf("appd-%s", name), 0o755)
-	if err != nil {
-		return nil, err
+	// cleanups functions
+	cleanup := func() {
+		os.RemoveAll(tmpDir)
 	}
-
-	appd := &Appd{
-		path:    path,
-		cleanup: cleanup,
-	}
-
-	for _, opt := range cfg {
-		opt(appd)
-	}
-
-	return appd, nil
-}
-
-// saveBytesTemp saves data bytes to a temporary file location at path.
-func saveBytesTemp(data []byte, prefix string, perm os.FileMode) (path string, cleanup func(), err error) {
-	f, err := os.CreateTemp("", prefix)
-	if err != nil {
-		return
-	}
-	defer f.Close()
-
-	path = f.Name()
-	cleanup = func() { os.Remove(path) }
 
 	defer func() {
 		if err != nil {
@@ -79,13 +53,86 @@ func saveBytesTemp(data []byte, prefix string, perm os.FileMode) (path string, c
 		}
 	}()
 
-	if _, err = f.Write(data); err != nil {
-		return
+	// extract all files from the tar archive to the temp directory
+	tr := tar.NewReader(gzr)
+	for {
+		header, err := tr.Next()
+		if err == io.EOF {
+			break // End of archive
+		}
+		if err != nil {
+			return nil, fmt.Errorf("failed to read tar header: %w", err)
+		}
+
+		if header.FileInfo().IsDir() {
+			// Create directory
+			dirPath := filepath.Join(tmpDir, header.Name)
+			if err := os.MkdirAll(dirPath, 0755); err != nil {
+				return nil, fmt.Errorf("failed to create directory %s: %w", dirPath, err)
+			}
+			continue
+		}
+
+		// Create file path
+		filePath := filepath.Join(tmpDir, header.Name)
+
+		// Create parent directory if it doesn't exist
+		if err := os.MkdirAll(filepath.Dir(filePath), 0755); err != nil {
+			return nil, fmt.Errorf("failed to create parent directory for %s: %w", filePath, err)
+		}
+
+		// Create file
+		f, err := os.OpenFile(filePath, os.O_CREATE|os.O_RDWR, header.FileInfo().Mode())
+		if err != nil {
+			return nil, fmt.Errorf("failed to create file %s: %w", filePath, err)
+		}
+
+		if _, err := io.Copy(f, tr); err != nil {
+			f.Close()
+			return nil, fmt.Errorf("failed to copy file contents to %s: %w", filePath, err)
+		}
+		f.Close()
 	}
 
-	err = os.Chmod(path, perm)
+	// look for the executable binary in the extracted files
+	var binaryPath string
+	err = filepath.Walk(tmpDir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
 
-	return
+		if !info.IsDir() && info.Mode()&0111 != 0 {
+			binaryPath = path
+			return filepath.SkipAll // Found it, stop searching
+		}
+		return nil
+	})
+
+	if err != nil {
+		return nil, fmt.Errorf("failed to find executable binary in the archive: %w", err)
+	} else if binaryPath == "" {
+		return nil, fmt.Errorf("no executable binary found in the archive for %s", name)
+	}
+
+	appd := &Appd{
+		path:    binaryPath,
+		cleanup: cleanup,
+		pid:     AppdStopped, // initialize with stopped state
+	}
+
+	for _, opt := range cfg {
+		opt(appd)
+	}
+
+	// verify the binary is executable for the current arch
+	testCmd := exec.Command(binaryPath, "--help")
+	testOutput, err := testCmd.CombinedOutput()
+	if err != nil {
+		return nil, fmt.Errorf("binary validation failed (%s): %w\nOutput: %s",
+			binaryPath, err, string(testOutput))
+	}
+
+	return appd, nil
 }
 
 func (a *Appd) Run(args ...string) error {
@@ -104,8 +151,7 @@ func (a *Appd) Run(args ...string) error {
 	go func() {
 		// wait for process to finish
 		if err := cmd.Wait(); err != nil {
-			// Log the error (consider using a proper logging package)
-			fmt.Printf("Process finished with error: %v\n", err)
+			log.Printf("Process finished with error: %v\n", err)
 		}
 
 		a.pid = -1 // reset pid
