@@ -4,7 +4,7 @@ import "github.com/01builders/nova/appd"
 
 // Version defines the configuration for remote apps.
 type Version struct {
-	Appd        appd.Appd
+	Appd        *appd.Appd
 	UntilHeight int64
 	StartArgs   []string // Extra arguments to pass to the app
 }

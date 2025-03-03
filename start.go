@@ -48,7 +48,7 @@ const (
 type StartCommandHandler = func(svrCtx *server.Context, clientCtx client.Context, appCreator types.AppCreator, withCmt bool, opts server.StartCmdOptions) error
 
 // New creates a command start handler to use in the Cosmos SDK server start options.
-func New(versions map[string]abci.Version) StartCommandHandler {
+func New(versions abci.Versions) StartCommandHandler {
 	return func(
 		svrCtx *server.Context,
 		clientCtx client.Context,
@@ -60,7 +60,7 @@ func New(versions map[string]abci.Version) StartCommandHandler {
 	}
 }
 
-func start(versions map[string]abci.Version, svrCtx *server.Context, clientCtx client.Context, appCreator types.AppCreator, withCmt bool) error {
+func start(versions abci.Versions, svrCtx *server.Context, clientCtx client.Context, appCreator types.AppCreator, withCmt bool) error {
 	svrCfg, err := getAndValidateConfig(svrCtx)
 	if err != nil {
 		return err
@@ -86,7 +86,7 @@ func start(versions map[string]abci.Version, svrCtx *server.Context, clientCtx c
 	return startInProcess(versions, svrCtx, svrCfg, clientCtx, app, metrics)
 }
 
-func startStandAlone(versions map[string]abci.Version, svrCtx *server.Context, svrCfg serverconfig.Config, clientCtx client.Context, app types.Application, metrics *telemetry.Metrics) error {
+func startStandAlone(versions abci.Versions, svrCtx *server.Context, svrCfg serverconfig.Config, clientCtx client.Context, app types.Application, metrics *telemetry.Metrics) error {
 	addr := svrCtx.Viper.GetString(flagAddress)
 	transport := svrCtx.Viper.GetString(flagTransport)
 
@@ -150,7 +150,7 @@ func startStandAlone(versions map[string]abci.Version, svrCtx *server.Context, s
 	return g.Wait()
 }
 
-func startInProcess(versions map[string]abci.Version, svrCtx *server.Context, svrCfg serverconfig.Config, clientCtx client.Context, app types.Application,
+func startInProcess(versions abci.Versions, svrCtx *server.Context, svrCfg serverconfig.Config, clientCtx client.Context, app types.Application,
 	metrics *telemetry.Metrics,
 ) error {
 	cmtCfg := svrCtx.Config
@@ -200,7 +200,7 @@ func startInProcess(versions map[string]abci.Version, svrCtx *server.Context, sv
 }
 
 func startCmtNode(
-	versions map[string]abci.Version,
+	versions abci.Versions,
 	ctx context.Context,
 	cfg *cmtcfg.Config,
 	app types.Application,
