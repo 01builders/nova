@@ -2,7 +2,9 @@ package abci
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"sync"
@@ -39,22 +41,30 @@ func NewMultiplexer(latestApp servertypes.ABCI, versions Versions, v *viper.Vipe
 		versions:  versions,
 	}
 
-	// check height from disk
-	wrapper.lastHeight, _ = wrapper.getLatestHeight(home, v) // if error assume genesis
-
-	// prepare correct version
 	var (
 		currentVersion Version
-		name           string
+		err            error
 	)
 
-	if wrapper.lastHeight == 0 {
-		currentVersion = versions.GenesisVersion()
-	} else {
-		name, currentVersion = versions.GetForHeight(wrapper.lastHeight)
+	// check height from disk
+	wrapper.lastHeight, err = wrapper.getLatestHeight(home, v) // if error assume genesis
+	if err != nil {
+		log.Printf("failed to get latest height from disk, assuming genesis: %v\n", err)
 	}
 
-	// prepare client
+	// prepare correct version
+	if wrapper.lastHeight == 0 {
+		currentVersion, err = versions.GenesisVersion()
+	} else {
+		currentVersion, err = versions.GetForHeight(wrapper.lastHeight)
+	}
+	if err != nil && errors.Is(err, ErrNoVersionFound) {
+		return wrapper, nil // no version found, assume latest
+	} else if err != nil {
+		return nil, fmt.Errorf("failed to get app for height %d: %w", wrapper.lastHeight, err)
+	}
+
+	// prepare remote app
 	grpcAddress := v.GetString(flagGRPCAddress)
 	if grpcAddress == "" {
 		grpcAddress = "localhost:9090"
@@ -74,11 +84,11 @@ func NewMultiplexer(latestApp servertypes.ABCI, versions Versions, v *viper.Vipe
 		}
 
 		if err := currentVersion.Appd.Run(append(programArgs, currentVersion.StartArgs...)...); err != nil {
-			return nil, fmt.Errorf("failed to start %s app: %w", name, err)
+			return nil, fmt.Errorf("failed to start app: %w", err)
 		}
 
 		if currentVersion.Appd.Pid() == appd.AppdStopped { // should never happen
-			panic(fmt.Sprintf("%s app has not started", name))
+			panic("app has not started")
 		}
 	}
 
@@ -97,7 +107,7 @@ func (m *multiplexer) getLatestHeight(rootDir string, v *viper.Viper) (int64, er
 	return height, db.Close()
 }
 
-// Helper to get the appropriate app based on height
+// getAppForHeight gets the appropriate app based on height
 func (m *multiplexer) getAppForHeight(height int64) servertypes.ABCI {
 	m.mu.Lock()
 	defer m.mu.Unlock()
