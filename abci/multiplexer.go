@@ -3,6 +3,7 @@ package abci
 import (
 	"context"
 	"fmt"
+	"os"
 	"path/filepath"
 	"sync"
 
@@ -19,45 +20,67 @@ import (
 	"github.com/01builders/nova/appd"
 )
 
-const LastestVersion = "latest"
-
-// Version defines the configuration for remote apps
-type Version struct {
-	Height      int64
-	Appd        appd.Appd
-	GRPCAddress string
-}
+const flagGRPCAddress = "grpc.address"
 
 type multiplexer struct {
+	mu sync.Mutex
+
 	currentHeight, lastHeight int64
 
 	latestApp servertypes.ABCI
-	versions  map[string]Version
-	conns     map[string]*grpc.ClientConn
-	mu        sync.Mutex
+	versions  Versions
+	conn      *grpc.ClientConn
 }
 
 // NewMultiplexer creates a new ABCI wrapper for multiplexing
-func NewMultiplexer(latestApp servertypes.ABCI, versions map[string]Version, v *viper.Viper, home string) (abci.Application, error) {
+func NewMultiplexer(latestApp servertypes.ABCI, versions Versions, v *viper.Viper, home string) (abci.Application, error) {
 	wrapper := &multiplexer{
 		latestApp: latestApp,
 		versions:  versions,
 	}
 
-	// connect to each app
-	for name, v := range versions {
-		conn, err := grpc.Dial(v.GRPCAddress,
-			grpc.WithTransportCredentials(insecure.NewCredentials()), // localhost so expecting unsecure
-		)
-		if err != nil {
-			return nil, fmt.Errorf("failed to connect to version %s at %s: %w", name, v.GRPCAddress, err)
-		}
-
-		wrapper.conns[name] = conn
-	}
-
 	// check height from disk
 	wrapper.lastHeight, _ = wrapper.getLatestHeight(home, v) // if error assume genesis
+
+	// prepare correct version
+	var (
+		currentVersion Version
+		name           string
+	)
+
+	if wrapper.lastHeight == 0 {
+		currentVersion = versions.GenesisVersion()
+	} else {
+		name, currentVersion = versions.GetForHeight(wrapper.lastHeight)
+	}
+
+	// prepare client
+	grpcAddress := v.GetString(flagGRPCAddress)
+	if grpcAddress == "" {
+		grpcAddress = "localhost:9090"
+	}
+
+	conn, err := grpc.NewClient(grpcAddress, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	if err != nil {
+		return nil, fmt.Errorf("failed to prepare app connection: %w", err)
+	}
+	wrapper.conn = conn
+
+	// start the correct version
+	if currentVersion.Appd.Pid() == appd.AppdStopped {
+		programArgs := os.Args
+		if len(os.Args) > 2 {
+			programArgs = os.Args[2:] // 'remove appd start' args
+		}
+
+		if err := currentVersion.Appd.Run(append(programArgs, currentVersion.StartArgs...)...); err != nil {
+			return nil, fmt.Errorf("failed to start %s app: %w", name, err)
+		}
+
+		if currentVersion.Appd.Pid() == appd.AppdStopped { // should never happen
+			panic(fmt.Sprintf("%s app has not started", name))
+		}
+	}
 
 	return wrapper, nil
 }
@@ -81,23 +104,11 @@ func (m *multiplexer) getAppForHeight(height int64) servertypes.ABCI {
 
 	m.currentHeight = height
 
-	latestVersion := ""
-	for name, v := range m.versions {
-		if height <= v.Height {
-			latestVersion = name
-			// we do not break, as we must check for all versions
-		}
-	}
-
-	if latestVersion == "" || latestVersion == LastestVersion {
+	if m.versions.ShouldLatestApp(height) {
 		return m.latestApp
 	}
 
-	if conn, ok := m.conns[latestVersion]; ok {
-		return NewRemoteABCIClient(conn)
-	}
-
-	return m.latestApp // Fallback to latest app if version not found
+	return NewRemoteABCIClient(m.conn)
 }
 
 func (m *multiplexer) ApplySnapshotChunk(_ context.Context, req *abci.RequestApplySnapshotChunk) (*abci.ResponseApplySnapshotChunk, error) {
