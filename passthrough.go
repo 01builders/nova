@@ -60,7 +60,10 @@ Use --version to specify a named version or --height to execute on the version a
 					return fmt.Errorf("height %d requires the latest app, use the command directly without passthrough", height)
 				}
 
-				versionName, appVersion = versions.GetForHeight(height)
+				appVersion, err = versions.GetForHeight(height)
+				if err != nil {
+					return fmt.Errorf("no version found for height %d: %w", height, err)
+				}
 			} else {
 				return errors.New("either --version or --height must be specified")
 			}
