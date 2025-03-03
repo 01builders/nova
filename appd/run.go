@@ -6,6 +6,7 @@ import (
 	"compress/gzip"
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"os/exec"
 )
@@ -30,29 +31,39 @@ func New(name string, bin []byte, cfg ...CfgOption) (*Appd, error) {
 	// untar the binary.
 	gzr, err := gzip.NewReader(bytes.NewReader(bin))
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to read binary data for %s: %w", name, err)
 	}
 	defer gzr.Close()
 
 	tr := tar.NewReader(gzr)
+	header, err := tr.Next()
+	if err != nil {
+		return nil, fmt.Errorf("failed to read tar header for %s: %w", name, err)
+	}
 
-	if _, err := tr.Next(); err != nil {
-		return nil, err
+	// Add validation for the tar header
+	if header == nil {
+		return nil, fmt.Errorf("invalid tar header for %s", name)
 	}
 
 	binary, err := io.ReadAll(tr)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to read binary data for %s: %w", name, err)
+	}
+
+	if len(binary) == 0 {
+		return nil, fmt.Errorf("extracted binary for %s is empty", name)
 	}
 
 	path, cleanup, err := saveBytesTemp(binary, fmt.Sprintf("appd-%s", name), 0o755)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to save binary for %s: %w", name, err)
 	}
 
 	appd := &Appd{
 		path:    path,
 		cleanup: cleanup,
+		pid:     AppdStopped, // initialize with stopped state
 	}
 
 	for _, opt := range cfg {
@@ -104,8 +115,7 @@ func (a *Appd) Run(args ...string) error {
 	go func() {
 		// wait for process to finish
 		if err := cmd.Wait(); err != nil {
-			// Log the error (consider using a proper logging package)
-			fmt.Printf("Process finished with error: %v\n", err)
+			log.Printf("Process finished with error: %v\n", err)
 		}
 
 		a.pid = -1 // reset pid
