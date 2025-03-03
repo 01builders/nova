@@ -135,6 +135,7 @@ func New(name string, bin []byte, cfg ...CfgOption) (*Appd, error) {
 	return appd, nil
 }
 
+// Run starts the appd binary with the given arguments.
 func (a *Appd) Run(args ...string) error {
 	cmd := exec.Command(a.path, args...)
 
@@ -160,6 +161,12 @@ func (a *Appd) Run(args ...string) error {
 	return nil
 }
 
+// CreateExecCommand creates an exec.Cmd for the appd binary.
+func (a *Appd) CreateExecCommand(args ...string) *exec.Cmd {
+	return exec.Command(a.path, args...)
+}
+
+// Pid returns the pid of the appd process.
 func (a *Appd) Pid() int {
 	return a.pid
 }
