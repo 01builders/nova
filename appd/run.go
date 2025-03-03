@@ -23,14 +23,14 @@ type Appd struct {
 
 // New takes a binary and untar it in a temporary directory.
 func New(name string, bin []byte, cfg ...CfgOption) (*Appd, error) {
-	if bin == nil {
+	if len(bin) == 0 {
 		bin = CelestiaApp()
 	}
 
 	// untar the binary.
 	gzr, err := gzip.NewReader(bytes.NewReader(bin))
 	if err != nil {
-		panic(err)
+		return nil, err
 	}
 	defer gzr.Close()
 
@@ -45,7 +45,7 @@ func New(name string, bin []byte, cfg ...CfgOption) (*Appd, error) {
 		return nil, err
 	}
 
-	path, cleanup, err := saveBytesTemp(binary, fmt.Sprintf("celestia-app-%s", name), 0o755)
+	path, cleanup, err := saveBytesTemp(binary, fmt.Sprintf("appd-%s", name), 0o755)
 	if err != nil {
 		return nil, err
 	}
