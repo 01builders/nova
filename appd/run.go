@@ -4,12 +4,13 @@ import (
 	"archive/tar"
 	"bytes"
 	"compress/gzip"
-	"context"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
 )
+
+const AppdStopped = -1
 
 // Appd represents the appd binary
 type Appd struct {
@@ -87,8 +88,8 @@ func saveBytesTemp(data []byte, prefix string, perm os.FileMode) (path string, c
 	return
 }
 
-func (a *Appd) Run(ctx context.Context, args ...string) error {
-	cmd := exec.CommandContext(ctx, a.path, args...)
+func (a *Appd) Run(args ...string) error {
+	cmd := exec.Command(a.path, args...)
 
 	// Set up I/O
 	cmd.Stdin = a.stdin
