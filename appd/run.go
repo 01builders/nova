@@ -118,6 +118,9 @@ func New(name string, bin []byte, cfg ...CfgOption) (*Appd, error) {
 		path:    binaryPath,
 		cleanup: cleanup,
 		pid:     AppdStopped, // initialize with stopped state
+		stdin:   os.Stdin,
+		stdout:  os.Stdout,
+		stderr:  os.Stderr,
 	}
 
 	for _, opt := range cfg {
@@ -163,7 +166,43 @@ func (a *Appd) Run(args ...string) error {
 
 // CreateExecCommand creates an exec.Cmd for the appd binary.
 func (a *Appd) CreateExecCommand(args ...string) *exec.Cmd {
-	return exec.Command(a.path, args...)
+	cmd := exec.Command(a.path, args...)
+	cmd.Stdin = a.stdin
+	cmd.Stdout = a.stdout
+	cmd.Stderr = a.stderr
+	return cmd
+}
+
+// Stop terminates the running appd process if it exists.
+func (a *Appd) Stop() error {
+	if a.pid == AppdStopped {
+		return nil
+	}
+
+	proc, err := os.FindProcess(a.pid)
+	if err != nil {
+		return fmt.Errorf("failed to find process with PID %d: %w", a.pid, err)
+	}
+
+	// send SIGTERM for graceful shutdown
+	if err := proc.Signal(os.Interrupt); err != nil {
+		log.Printf("Failed to send interrupt signal, attempting to kill: %v", err)
+		// if interrupt fails, try harder with Kill
+		if err := proc.Kill(); err != nil {
+			return fmt.Errorf("failed to kill process with PID %d: %w", a.pid, err)
+		}
+	}
+
+	// Wait for the process to exit
+	state, err := proc.Wait()
+	if err != nil {
+		log.Printf("Error waiting for process to exit: %v", err)
+	} else {
+		log.Printf("Process exited with state: %v", state)
+	}
+
+	a.pid = AppdStopped
+	return nil
 }
 
 // Pid returns the pid of the appd process.

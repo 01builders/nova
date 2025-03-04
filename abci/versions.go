@@ -14,6 +14,7 @@ var ErrNoVersionFound = errors.New("no version found")
 type Version struct {
 	Appd        *appd.Appd
 	UntilHeight int64
+	PreHandler  string   // Command to run before starting the app
 	StartArgs   []string // Extra arguments to pass to the app
 }
 
