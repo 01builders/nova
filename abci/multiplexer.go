@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log"
 	"os"
 	"path/filepath"
 	"sync"
@@ -13,6 +12,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 
+	"cosmossdk.io/log"
 	"cosmossdk.io/store/rootmulti"
 	abci "github.com/cometbft/cometbft/abci/types"
 	dbm "github.com/cosmos/cosmos-db"
@@ -25,7 +25,8 @@ import (
 const flagGRPCAddress = "grpc.address"
 
 type Multiplexer struct {
-	mu sync.Mutex
+	logger log.Logger
+	mu     sync.Mutex
 
 	currentHeight, lastHeight int64
 	started                   bool
@@ -38,8 +39,15 @@ type Multiplexer struct {
 }
 
 // NewMultiplexer creates a new ABCI wrapper for multiplexing
-func NewMultiplexer(latestApp servertypes.ABCI, versions Versions, v *viper.Viper, home string) (abci.Application, error) {
+func NewMultiplexer(
+	logger log.Logger,
+	latestApp servertypes.ABCI,
+	versions Versions,
+	v *viper.Viper,
+	home string,
+) (abci.Application, error) {
 	wrapper := &Multiplexer{
+		logger:    logger,
 		latestApp: latestApp,
 		versions:  versions,
 	}
@@ -52,7 +60,7 @@ func NewMultiplexer(latestApp servertypes.ABCI, versions Versions, v *viper.Vipe
 	// check height from disk
 	wrapper.lastHeight, err = wrapper.getLatestHeight(home, v) // if error assume genesis
 	if err != nil {
-		log.Printf("failed to get latest height from disk, assuming genesis: %v\n", err)
+		logger.Info(fmt.Sprintf("failed to get latest height from disk, assuming genesis: %v\n", err))
 	}
 
 	// prepare correct version
@@ -140,7 +148,7 @@ func (m *Multiplexer) getAppForHeight(height int64) (servertypes.ABCI, error) {
 		// check if an app is already started
 		// stop the app if it's running
 		if m.activeVersion.Appd != nil && m.activeVersion.Appd.Pid() != appd.AppdStopped {
-			log.Printf("Stopping app for height %d", m.activeVersion.UntilHeight)
+			m.logger.Info(fmt.Sprintf("Stopping app for height %d", m.activeVersion.UntilHeight))
 			if err := m.activeVersion.Appd.Stop(); err != nil {
 				return nil, fmt.Errorf("failed to stop app for height %d: %w", m.activeVersion.UntilHeight, err)
 			}
@@ -152,7 +160,7 @@ func (m *Multiplexer) getAppForHeight(height int64) (servertypes.ABCI, error) {
 			if currentVersion.PreHandler != "" {
 				preCmd := currentVersion.Appd.CreateExecCommand(currentVersion.PreHandler)
 				if err := preCmd.Run(); err != nil {
-					log.Printf("Warning: PreHandler failed: %v", err)
+					m.logger.Info(fmt.Sprintf("Warning: PreHandler failed: %v", err))
 					// Continue anyway as the pre-handler might be optional
 				}
 			}
@@ -188,7 +196,7 @@ func (m *Multiplexer) Cleanup() error {
 
 	// stop any running app
 	if m.activeVersion.Appd != nil && m.activeVersion.Appd.Pid() != appd.AppdStopped {
-		log.Printf("Stopping app for height %d", m.activeVersion.UntilHeight)
+		m.logger.Info(fmt.Sprintf("Stopping app for height %d", m.activeVersion.UntilHeight))
 		if err := m.activeVersion.Appd.Stop(); err != nil {
 			errs = errors.Join(errs, fmt.Errorf("failed to stop app for height %d: %w", m.activeVersion.UntilHeight, err))
 		}

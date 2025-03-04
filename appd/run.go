@@ -25,8 +25,13 @@ type Appd struct {
 
 // New takes a binary and untar it in a temporary directory.
 func New(name string, bin []byte, cfg ...CfgOption) (*Appd, error) {
+
 	if len(bin) == 0 {
-		bin = CelestiaApp()
+		var err error
+		bin, err = CelestiaApp()
+		if err != nil {
+			return nil, fmt.Errorf("fallback celestia-app failed; failed to get binary data for %s: %w", name, err)
+		}
 	}
 
 	// untar the binary.
@@ -194,11 +199,9 @@ func (a *Appd) Stop() error {
 	}
 
 	// Wait for the process to exit
-	state, err := proc.Wait()
+	_, err = proc.Wait()
 	if err != nil {
 		log.Printf("Error waiting for process to exit: %v", err)
-	} else {
-		log.Printf("Process exited with state: %v", state)
 	}
 
 	a.pid = AppdStopped
