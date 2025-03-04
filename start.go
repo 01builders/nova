@@ -6,10 +6,13 @@ import (
 	"io"
 	"net"
 	"os"
+	"os/signal"
 	"path/filepath"
+	"syscall"
 
 	"github.com/01builders/nova/abci"
 	cometserver "github.com/cometbft/cometbft/abci/server"
+	cmtabci "github.com/cometbft/cometbft/abci/types"
 	cmtcfg "github.com/cometbft/cometbft/config"
 	"github.com/cometbft/cometbft/node"
 	"github.com/cometbft/cometbft/p2p"
@@ -94,6 +97,9 @@ func startStandAlone(versions abci.Versions, svrCtx *server.Context, svrCfg serv
 	if err != nil {
 		return err
 	}
+
+	// register cleanup handler for remote apps
+	setupRemoteAppCleanup(cmtApp, svrCtx)
 
 	svr, err := cometserver.NewServer(addr, transport, cmtApp)
 	if err != nil {
@@ -216,6 +222,9 @@ func startCmtNode(
 		return nil, cleanupFn, err
 	}
 
+	// Register cleanup handler for remote apps
+	setupRemoteAppCleanup(cmtApp, svrCtx)
+
 	tmNode, err = node.NewNodeWithContext(
 		ctx,
 		cfg,
@@ -240,9 +249,37 @@ func startCmtNode(
 		if tmNode != nil && tmNode.IsRunning() {
 			_ = tmNode.Stop()
 		}
+
+		// also ensure we stop any remote apps
+		if multiplexer, ok := cmtApp.(*abci.Multiplexer); ok {
+			_ = multiplexer.Cleanup()
+		}
 	}
 
 	return tmNode, cleanupFn, nil
+}
+
+// setupRemoteAppCleanup ensures that remote app processes are terminated when the main process receives termination signals
+func setupRemoteAppCleanup(cmtApp cmtabci.Application, svrCtx *server.Context) {
+	if multiplexer, ok := cmtApp.(*abci.Multiplexer); ok {
+		sigCh := make(chan os.Signal, 1)
+		signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
+
+		go func() {
+			sig := <-sigCh
+			svrCtx.Logger.Info("Received signal, stopping remote apps...", "signal", sig)
+
+			if err := multiplexer.Cleanup(); err != nil {
+				svrCtx.Logger.Error("Error stopping remote apps", "err", err)
+			} else {
+				svrCtx.Logger.Info("Successfully stopped remote apps")
+			}
+
+			// Re-send the signal to allow the normal process termination
+			signal.Reset(os.Interrupt, syscall.SIGTERM)
+			syscall.Kill(os.Getpid(), sig.(syscall.Signal))
+		}()
+	}
 }
 
 func getAndValidateConfig(svrCtx *server.Context) (serverconfig.Config, error) {

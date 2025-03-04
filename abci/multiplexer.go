@@ -24,7 +24,7 @@ import (
 
 const flagGRPCAddress = "grpc.address"
 
-type multiplexer struct {
+type Multiplexer struct {
 	mu sync.Mutex
 
 	currentHeight, lastHeight int64
@@ -39,7 +39,7 @@ type multiplexer struct {
 
 // NewMultiplexer creates a new ABCI wrapper for multiplexing
 func NewMultiplexer(latestApp servertypes.ABCI, versions Versions, v *viper.Viper, home string) (abci.Application, error) {
-	wrapper := &multiplexer{
+	wrapper := &Multiplexer{
 		latestApp: latestApp,
 		versions:  versions,
 	}
@@ -101,7 +101,7 @@ func NewMultiplexer(latestApp servertypes.ABCI, versions Versions, v *viper.Vipe
 	return wrapper, nil
 }
 
-func (m *multiplexer) getLatestHeight(rootDir string, v *viper.Viper) (int64, error) {
+func (m *Multiplexer) getLatestHeight(rootDir string, v *viper.Viper) (int64, error) {
 	dataDir := filepath.Join(rootDir, "data")
 	db, err := dbm.NewDB("application", server.GetAppDBBackend(v), dataDir)
 	if err != nil {
@@ -114,7 +114,7 @@ func (m *multiplexer) getLatestHeight(rootDir string, v *viper.Viper) (int64, er
 }
 
 // getAppForHeight gets the appropriate app based on height
-func (m *multiplexer) getAppForHeight(height int64) (servertypes.ABCI, error) {
+func (m *Multiplexer) getAppForHeight(height int64) (servertypes.ABCI, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -179,7 +179,35 @@ func (m *multiplexer) getAppForHeight(height int64) (servertypes.ABCI, error) {
 	return NewRemoteABCIClient(m.conn), nil
 }
 
-func (m *multiplexer) ApplySnapshotChunk(_ context.Context, req *abci.RequestApplySnapshotChunk) (*abci.ResponseApplySnapshotChunk, error) {
+// Cleanup allows proper multiplexer termination.
+func (m *Multiplexer) Cleanup() error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	var errs error
+
+	// stop any running app
+	if m.activeVersion.Appd != nil && m.activeVersion.Appd.Pid() != appd.AppdStopped {
+		log.Printf("Stopping app for height %d", m.activeVersion.UntilHeight)
+		if err := m.activeVersion.Appd.Stop(); err != nil {
+			errs = errors.Join(errs, fmt.Errorf("failed to stop app for height %d: %w", m.activeVersion.UntilHeight, err))
+		}
+		m.started = false
+		m.activeVersion = Version{}
+	}
+
+	// close gRPC connection
+	if m.conn != nil {
+		if err := m.conn.Close(); err != nil {
+			errs = errors.Join(errs, fmt.Errorf("failed to close gRPC connection: %w", err))
+		}
+		m.conn = nil
+	}
+
+	return errs
+}
+
+func (m *Multiplexer) ApplySnapshotChunk(_ context.Context, req *abci.RequestApplySnapshotChunk) (*abci.ResponseApplySnapshotChunk, error) {
 	app, err := m.getAppForHeight(m.lastHeight)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get app for height %d: %w", m.lastHeight, err)
@@ -187,7 +215,7 @@ func (m *multiplexer) ApplySnapshotChunk(_ context.Context, req *abci.RequestApp
 	return app.ApplySnapshotChunk(req)
 }
 
-func (m *multiplexer) CheckTx(_ context.Context, req *abci.RequestCheckTx) (*abci.ResponseCheckTx, error) {
+func (m *Multiplexer) CheckTx(_ context.Context, req *abci.RequestCheckTx) (*abci.ResponseCheckTx, error) {
 	app, err := m.getAppForHeight(m.lastHeight)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get app for height %d: %w", m.lastHeight, err)
@@ -195,7 +223,7 @@ func (m *multiplexer) CheckTx(_ context.Context, req *abci.RequestCheckTx) (*abc
 	return app.CheckTx(req)
 }
 
-func (m *multiplexer) Commit(context.Context, *abci.RequestCommit) (*abci.ResponseCommit, error) {
+func (m *Multiplexer) Commit(context.Context, *abci.RequestCommit) (*abci.ResponseCommit, error) {
 	app, err := m.getAppForHeight(m.lastHeight)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get app for height %d: %w", m.lastHeight, err)
@@ -203,7 +231,7 @@ func (m *multiplexer) Commit(context.Context, *abci.RequestCommit) (*abci.Respon
 	return app.Commit()
 }
 
-func (m *multiplexer) ExtendVote(ctx context.Context, req *abci.RequestExtendVote) (*abci.ResponseExtendVote, error) {
+func (m *Multiplexer) ExtendVote(ctx context.Context, req *abci.RequestExtendVote) (*abci.ResponseExtendVote, error) {
 	m.lastHeight = req.Height
 	app, err := m.getAppForHeight(req.Height)
 	if err != nil {
@@ -212,7 +240,7 @@ func (m *multiplexer) ExtendVote(ctx context.Context, req *abci.RequestExtendVot
 	return app.ExtendVote(ctx, req)
 }
 
-func (m *multiplexer) FinalizeBlock(_ context.Context, req *abci.RequestFinalizeBlock) (*abci.ResponseFinalizeBlock, error) {
+func (m *Multiplexer) FinalizeBlock(_ context.Context, req *abci.RequestFinalizeBlock) (*abci.ResponseFinalizeBlock, error) {
 	m.lastHeight = req.Height
 	app, err := m.getAppForHeight(req.Height)
 	if err != nil {
@@ -221,11 +249,11 @@ func (m *multiplexer) FinalizeBlock(_ context.Context, req *abci.RequestFinalize
 	return app.FinalizeBlock(req)
 }
 
-func (m *multiplexer) Info(_ context.Context, req *abci.RequestInfo) (*abci.ResponseInfo, error) {
+func (m *Multiplexer) Info(_ context.Context, req *abci.RequestInfo) (*abci.ResponseInfo, error) {
 	return m.latestApp.Info(req) // Always use latest app for Info
 }
 
-func (m *multiplexer) InitChain(_ context.Context, req *abci.RequestInitChain) (*abci.ResponseInitChain, error) {
+func (m *Multiplexer) InitChain(_ context.Context, req *abci.RequestInitChain) (*abci.ResponseInitChain, error) {
 	app, err := m.getAppForHeight(0)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get app for genesis: %w", err)
@@ -233,7 +261,7 @@ func (m *multiplexer) InitChain(_ context.Context, req *abci.RequestInitChain) (
 	return app.InitChain(req)
 }
 
-func (m *multiplexer) ListSnapshots(_ context.Context, req *abci.RequestListSnapshots) (*abci.ResponseListSnapshots, error) {
+func (m *Multiplexer) ListSnapshots(_ context.Context, req *abci.RequestListSnapshots) (*abci.ResponseListSnapshots, error) {
 	app, err := m.getAppForHeight(m.lastHeight)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get app for height %d: %w", m.lastHeight, err)
@@ -241,7 +269,7 @@ func (m *multiplexer) ListSnapshots(_ context.Context, req *abci.RequestListSnap
 	return app.ListSnapshots(req)
 }
 
-func (m *multiplexer) LoadSnapshotChunk(_ context.Context, req *abci.RequestLoadSnapshotChunk) (*abci.ResponseLoadSnapshotChunk, error) {
+func (m *Multiplexer) LoadSnapshotChunk(_ context.Context, req *abci.RequestLoadSnapshotChunk) (*abci.ResponseLoadSnapshotChunk, error) {
 	app, err := m.getAppForHeight(int64(req.Height))
 	if err != nil {
 		return nil, fmt.Errorf("failed to get app for height %d: %w", req.Height, err)
@@ -249,7 +277,7 @@ func (m *multiplexer) LoadSnapshotChunk(_ context.Context, req *abci.RequestLoad
 	return app.LoadSnapshotChunk(req)
 }
 
-func (m *multiplexer) OfferSnapshot(_ context.Context, req *abci.RequestOfferSnapshot) (*abci.ResponseOfferSnapshot, error) {
+func (m *Multiplexer) OfferSnapshot(_ context.Context, req *abci.RequestOfferSnapshot) (*abci.ResponseOfferSnapshot, error) {
 	app, err := m.getAppForHeight(m.lastHeight)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get app for height %d: %w", m.lastHeight, err)
@@ -257,7 +285,7 @@ func (m *multiplexer) OfferSnapshot(_ context.Context, req *abci.RequestOfferSna
 	return app.OfferSnapshot(req)
 }
 
-func (m *multiplexer) PrepareProposal(_ context.Context, req *abci.RequestPrepareProposal) (*abci.ResponsePrepareProposal, error) {
+func (m *Multiplexer) PrepareProposal(_ context.Context, req *abci.RequestPrepareProposal) (*abci.ResponsePrepareProposal, error) {
 	m.lastHeight = req.Height
 	app, err := m.getAppForHeight(req.Height)
 	if err != nil {
@@ -266,7 +294,7 @@ func (m *multiplexer) PrepareProposal(_ context.Context, req *abci.RequestPrepar
 	return app.PrepareProposal(req)
 }
 
-func (m *multiplexer) ProcessProposal(_ context.Context, req *abci.RequestProcessProposal) (*abci.ResponseProcessProposal, error) {
+func (m *Multiplexer) ProcessProposal(_ context.Context, req *abci.RequestProcessProposal) (*abci.ResponseProcessProposal, error) {
 	m.lastHeight = req.Height
 	app, err := m.getAppForHeight(req.Height)
 	if err != nil {
@@ -275,7 +303,7 @@ func (m *multiplexer) ProcessProposal(_ context.Context, req *abci.RequestProces
 	return app.ProcessProposal(req)
 }
 
-func (m *multiplexer) Query(ctx context.Context, req *abci.RequestQuery) (*abci.ResponseQuery, error) {
+func (m *Multiplexer) Query(ctx context.Context, req *abci.RequestQuery) (*abci.ResponseQuery, error) {
 	app, err := m.getAppForHeight(req.Height)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get app for height %d: %w", req.Height, err)
@@ -283,7 +311,7 @@ func (m *multiplexer) Query(ctx context.Context, req *abci.RequestQuery) (*abci.
 	return app.Query(ctx, req)
 }
 
-func (m *multiplexer) VerifyVoteExtension(_ context.Context, req *abci.RequestVerifyVoteExtension) (*abci.ResponseVerifyVoteExtension, error) {
+func (m *Multiplexer) VerifyVoteExtension(_ context.Context, req *abci.RequestVerifyVoteExtension) (*abci.ResponseVerifyVoteExtension, error) {
 	m.lastHeight = req.Height
 	app, err := m.getAppForHeight(req.Height)
 	if err != nil {
