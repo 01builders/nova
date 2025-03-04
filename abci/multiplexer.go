@@ -94,7 +94,7 @@ func NewMultiplexer(
 			programArgs = os.Args[2:] // remove 'appd start' args
 		}
 
-		if err := currentVersion.Appd.Run(append(programArgs, currentVersion.StartArgs...)...); err != nil {
+		if err := currentVersion.Appd.Start(append(programArgs, currentVersion.StartArgs...)...); err != nil {
 			return nil, fmt.Errorf("failed to start app: %w", err)
 		}
 
@@ -171,7 +171,7 @@ func (m *Multiplexer) getAppForHeight(height int64) (servertypes.ABCI, error) {
 				programArgs = os.Args[2:] // Remove 'appd start' args
 			}
 
-			if err := currentVersion.Appd.Run(append(programArgs, currentVersion.StartArgs...)...); err != nil {
+			if err := currentVersion.Appd.Start(append(programArgs, currentVersion.StartArgs...)...); err != nil {
 				return nil, fmt.Errorf("failed to start app for height %d: %w", height, err)
 			}
 
