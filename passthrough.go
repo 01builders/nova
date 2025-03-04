@@ -3,7 +3,6 @@ package nova
 import (
 	"errors"
 	"fmt"
-	"os"
 	"strconv"
 	"strings"
 
@@ -75,10 +74,6 @@ Use --version to specify a named version or --height to execute on the version a
 
 			// prepare the command to be executed
 			execCmd := appVersion.Appd.CreateExecCommand(args...)
-			execCmd.Stdin = os.Stdin
-			execCmd.Stdout = os.Stdout
-			execCmd.Stderr = os.Stderr
-
 			return execCmd.Run()
 		},
 	}
