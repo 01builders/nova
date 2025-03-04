@@ -24,12 +24,14 @@ import (
 
 const flagGRPCAddress = "grpc.address"
 
+var remoteFlags = []string{"--grpc.enable", "true", "--api.enable", "false", "--api.swagger", "false"}
+
 type Multiplexer struct {
 	logger log.Logger
 	mu     sync.Mutex
 
-	currentHeight, lastHeight int64
-	started                   bool
+	lastHeight int64
+	started    bool
 
 	latestApp     servertypes.ABCI
 	activeVersion Version
@@ -94,6 +96,10 @@ func NewMultiplexer(
 			programArgs = os.Args[2:] // remove 'appd start' args
 		}
 
+		if len(currentVersion.StartArgs) == 0 {
+			currentVersion.StartArgs = remoteFlags
+		}
+
 		if err := currentVersion.Appd.Start(append(programArgs, currentVersion.StartArgs...)...); err != nil {
 			return nil, fmt.Errorf("failed to start app: %w", err)
 		}
@@ -125,8 +131,6 @@ func (m *Multiplexer) getLatestHeight(rootDir string, v *viper.Viper) (int64, er
 func (m *Multiplexer) getAppForHeight(height int64) (servertypes.ABCI, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-
-	m.currentHeight = height
 
 	// use the latest app if the height is beyond all defined versions
 	if m.versions.ShouldLatestApp(height) {
@@ -169,6 +173,10 @@ func (m *Multiplexer) getAppForHeight(height int64) (servertypes.ABCI, error) {
 			programArgs := os.Args
 			if len(os.Args) > 2 {
 				programArgs = os.Args[2:] // Remove 'appd start' args
+			}
+
+			if len(currentVersion.StartArgs) == 0 {
+				currentVersion.StartArgs = remoteFlags
 			}
 
 			if err := currentVersion.Appd.Start(append(programArgs, currentVersion.StartArgs...)...); err != nil {
