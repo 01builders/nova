@@ -1,20 +1,16 @@
 package appd
 
 import (
-	"log"
+	"fmt"
 	"runtime"
 )
 
 // CelestiaApp returns the compressed platform specific Celestia binary.
-func CelestiaApp() []byte {
-	// Add platform detection and logging for debugging
-	platform := runtime.GOOS + "_" + runtime.GOARCH
-	log.Printf("Loading binary for platform: %s", platform)
-
-	// Check if we actually have binary data
+func CelestiaApp() ([]byte, error) {
+	platform := runtime.GOOS + "_" + runtime.GOARCH // Check if we actually have binary data
 	if len(binaryCompressed) == 0 {
-		log.Fatalf("Warning: No binary data available for platform %s", platform)
+		return nil, fmt.Errorf("no binary data available for platform %s", platform)
 	}
 
-	return binaryCompressed
+	return binaryCompressed, nil
 }

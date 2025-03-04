@@ -2,7 +2,6 @@ package nova
 
 import (
 	"context"
-	"fmt"
 	"io"
 	"net"
 	"os"
@@ -10,15 +9,14 @@ import (
 	"path/filepath"
 	"syscall"
 
+	"cosmossdk.io/log"
 	"github.com/01builders/nova/abci"
-	cometserver "github.com/cometbft/cometbft/abci/server"
 	cmtabci "github.com/cometbft/cometbft/abci/types"
 	cmtcfg "github.com/cometbft/cometbft/config"
 	"github.com/cometbft/cometbft/node"
 	"github.com/cometbft/cometbft/p2p"
 	pvm "github.com/cometbft/cometbft/privval"
 	"github.com/cometbft/cometbft/proxy"
-	rpchttp "github.com/cometbft/cometbft/rpc/client/http"
 	"github.com/cometbft/cometbft/rpc/client/local"
 	cmttypes "github.com/cometbft/cometbft/types"
 	dbm "github.com/cosmos/cosmos-db"
@@ -56,14 +54,14 @@ func New(versions abci.Versions) StartCommandHandler {
 		svrCtx *server.Context,
 		clientCtx client.Context,
 		appCreator types.AppCreator,
-		withCmt bool,
+		_ bool,
 		_ server.StartCmdOptions,
 	) error {
-		return start(versions, svrCtx, clientCtx, appCreator, withCmt)
+		return start(versions, svrCtx, clientCtx, appCreator)
 	}
 }
 
-func start(versions abci.Versions, svrCtx *server.Context, clientCtx client.Context, appCreator types.AppCreator, withCmt bool) error {
+func start(versions abci.Versions, svrCtx *server.Context, clientCtx client.Context, appCreator types.AppCreator) error {
 	svrCfg, err := getAndValidateConfig(svrCtx)
 	if err != nil {
 		return err
@@ -82,78 +80,7 @@ func start(versions abci.Versions, svrCtx *server.Context, clientCtx client.Cont
 
 	emitServerInfoMetrics()
 
-	if !withCmt {
-		return startStandAlone(versions, svrCtx, svrCfg, clientCtx, app, metrics)
-	}
-
 	return startInProcess(versions, svrCtx, svrCfg, clientCtx, app, metrics)
-}
-
-func startStandAlone(versions abci.Versions, svrCtx *server.Context, svrCfg serverconfig.Config, clientCtx client.Context, app types.Application, metrics *telemetry.Metrics) error {
-	addr := svrCtx.Viper.GetString(flagAddress)
-	transport := svrCtx.Viper.GetString(flagTransport)
-
-	cmtApp, err := abci.NewMultiplexer(app, versions, svrCtx.Viper, svrCtx.Config.RootDir)
-	if err != nil {
-		return err
-	}
-
-	// register cleanup handler for remote apps
-	setupRemoteAppCleanup(cmtApp, svrCtx)
-
-	svr, err := cometserver.NewServer(addr, transport, cmtApp)
-	if err != nil {
-		return fmt.Errorf("error creating listener: %v", err)
-	}
-
-	svr.SetLogger(servercmtlog.CometLoggerWrapper{Logger: svrCtx.Logger.With("module", "abci-server")})
-
-	g, ctx := getCtx(svrCtx, false)
-
-	// Add the tx service to the gRPC router. We only need to register this
-	// service if API or gRPC is enabled, and avoid doing so in the general
-	// case, because it spawns a new local CometBFT RPC client.
-	if svrCfg.API.Enable || svrCfg.GRPC.Enable {
-		// create tendermint client
-		// assumes the rpc listen address is where tendermint has its rpc server
-		rpcclient, err := rpchttp.New(svrCtx.Config.RPC.ListenAddress, "/websocket")
-		if err != nil {
-			return err
-		}
-		// re-assign for making the client available below
-		// do not use := to avoid shadowing clientCtx
-		clientCtx = clientCtx.WithClient(rpcclient)
-
-		// use the provided clientCtx to register the services
-		app.RegisterTxService(clientCtx)
-		app.RegisterTendermintService(clientCtx)
-		app.RegisterNodeService(clientCtx, svrCfg)
-	}
-
-	grpcSrv, clientCtx, err := startGrpcServer(ctx, g, svrCfg.GRPC, clientCtx, svrCtx, app)
-	if err != nil {
-		return err
-	}
-
-	err = startAPIServer(ctx, g, svrCfg, clientCtx, svrCtx, app, svrCtx.Config.RootDir, grpcSrv, metrics)
-	if err != nil {
-		return err
-	}
-
-	g.Go(func() error {
-		if err := svr.Start(); err != nil {
-			svrCtx.Logger.Error("failed to start out-of-process ABCI server", "err", err)
-			return err
-		}
-
-		// Wait for the calling process to be canceled or close the provided context,
-		// so we can gracefully stop the ABCI server.
-		<-ctx.Done()
-		svrCtx.Logger.Info("stopping the ABCI server...")
-		return svr.Stop()
-	})
-
-	return g.Wait()
 }
 
 func startInProcess(versions abci.Versions, svrCtx *server.Context, svrCfg serverconfig.Config, clientCtx client.Context, app types.Application,
@@ -217,7 +144,7 @@ func startCmtNode(
 		return nil, cleanupFn, err
 	}
 
-	cmtApp, err := abci.NewMultiplexer(app, versions, svrCtx.Viper, svrCtx.Config.RootDir)
+	cmtApp, err := abci.NewMultiplexer(svrCtx.Logger.With("multiplexer"), app, versions, svrCtx.Viper, svrCtx.Config.RootDir)
 	if err != nil {
 		return nil, cleanupFn, err
 	}
@@ -380,7 +307,7 @@ func startGrpcServer(
 	// Start the gRPC server in a goroutine. Note, the provided ctx will ensure
 	// that the server is gracefully shut down.
 	g.Go(func() error {
-		return servergrpc.StartGRPCServer(ctx, svrCtx.Logger.With("module", "grpc-server"), config, grpcSrv)
+		return servergrpc.StartGRPCServer(ctx, svrCtx.Logger.With(log.ModuleKey, "grpc-server"), config, grpcSrv)
 	})
 	return grpcSrv, clientCtx, nil
 }
@@ -402,7 +329,7 @@ func startAPIServer(
 
 	clientCtx = clientCtx.WithHomeDir(home)
 
-	apiSrv := api.New(clientCtx, svrCtx.Logger.With("module", "api-server"), grpcSrv)
+	apiSrv := api.New(clientCtx, svrCtx.Logger.With(log.ModuleKey, "api-server"), grpcSrv)
 	app.RegisterAPIRoutes(apiSrv, svrCfg.API)
 
 	if svrCfg.Telemetry.Enabled {
