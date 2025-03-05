@@ -10,43 +10,15 @@ jobs:
     steps:
       - name: Checkout Nova Repository
         uses: actions/checkout@v4
-        with:
-          repository: "01builders/nova"
-          path: "nova"
-
-      - name: Checkout Celestia App Repository
-        uses: actions/checkout@v4
-        with:
-          repository: "01builders/celestia-app"
-          ref: "sdk-v0.50.x" # TODO: for now explicitly checkout the feature branch.
-          path: "celestia-app"
 
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
           go-version: "stable"
 
-      - name: Build Celestia App Binary
-        run: |
-          cd celestia-app
-          # TODO: we can pull from released binaries in the future rather than building.
-          make build
-          mkdir -p $HOME/bin
-          mv build/celestia-appd $HOME/bin/
-
-      - name: Archive Celestia App Binary
-        run: |
-          cd $HOME/bin
-          tar -czvf celestia-app_Linux_x86_64.tar.gz celestia-appd
-
-      - name: Copy Binary to Nova Repo
-        run: |
-          # remove all binaries in the repo.
-          rm nova/appd/celestia-app_*
-          # copy over the one we just built.
-          cp $HOME/bin/celestia-app_Linux_x86_64.tar.gz nova/appd
+      - name: Fetch Release
+        # download the celestia release for embedded tests.
+        run: curl -o appd/celestia-app_Linux_x86_64.tar.gz https://github.com/celestiaorg/celestia-app/releases/download/v3.3.1/celestia-app_Linux_x86_64.tar.gz
 
       - name: Run Tests
-        run: |
-          cd nova
-          make test-cover
+        run: make test-cover
