@@ -12,7 +12,7 @@ func WithStdOut(stdout io.Writer) CfgOption {
 	}
 }
 
-// WithStdOut configures the standard error of the app.
+// WithStdErr configures the standard error of the app.
 func WithStdErr(stderr io.Writer) CfgOption {
 	return func(a *Appd) *Appd {
 		a.stderr = stderr
