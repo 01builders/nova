@@ -7,7 +7,12 @@ import (
 )
 
 func TestCelestiaApp(t *testing.T) {
+	// prevent messing with other tests by modifying this.
 	realData := binaryCompressed
+	defer func() {
+		binaryCompressed = realData
+	}()
+
 	tests := []struct {
 		name          string
 		modifyFn      func()
