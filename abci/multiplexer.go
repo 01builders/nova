@@ -18,9 +18,6 @@ import (
 	"github.com/01builders/nova/appd"
 )
 
-// remoteFlags are the default flags for the remote app
-var remoteFlags = []string{"--grpc.enable=true", "--api.enable=false", "--api.swagger=false", "--with-tendermint=false", "--transport=grpc"}
-
 type Multiplexer struct {
 	logger log.Logger
 	mu     sync.Mutex
@@ -90,11 +87,7 @@ func NewMultiplexer(
 			programArgs = os.Args[2:] // remove 'appd start' args
 		}
 
-		if len(currentVersion.StartArgs) == 0 {
-			currentVersion.StartArgs = remoteFlags
-		}
-
-		if err := currentVersion.Appd.Start(append(programArgs, currentVersion.StartArgs...)...); err != nil {
+		if err := currentVersion.Appd.Start(currentVersion.GetStartArgs(programArgs)...); err != nil {
 			return nil, fmt.Errorf("failed to start app: %w", err)
 		}
 
@@ -158,11 +151,7 @@ func (m *Multiplexer) getAppForHeight(height int64) (servertypes.ABCI, error) {
 				programArgs = os.Args[2:] // Remove 'appd start' args
 			}
 
-			if len(currentVersion.StartArgs) == 0 {
-				currentVersion.StartArgs = remoteFlags
-			}
-
-			if err := currentVersion.Appd.Start(append(programArgs, currentVersion.StartArgs...)...); err != nil {
+			if err := currentVersion.Appd.Start(currentVersion.GetStartArgs(programArgs)...); err != nil {
 				return nil, fmt.Errorf("failed to start app for height %d: %w", height, err)
 			}
 
