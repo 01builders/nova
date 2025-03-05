@@ -36,7 +36,7 @@ jobs:
 
   test:
     runs-on: ubuntu-latest
-    depends-on: build-celestia
+    needs: build-celestia
     steps:
       - name: Checkout Repo
         uses: actions/checkout@v4
