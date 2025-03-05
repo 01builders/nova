@@ -19,7 +19,7 @@ import (
 )
 
 // remoteFlags are the default flags for the remote app
-var remoteFlags = []string{"--grpc.enable", "true", "--api.enable", "false", "--api.swagger", "false"}
+var remoteFlags = []string{"--grpc.enable=true", "--api.enable=false", "--api.swagger=false", "--with-tendermint=false"}
 
 type Multiplexer struct {
 	logger log.Logger
@@ -54,9 +54,6 @@ func NewMultiplexer(
 		currentVersion Version
 		err            error
 	)
-
-	// No need to read height from disk; use the value passed in
-	// We already know from start.go whether we should use the latest app
 
 	// prepare correct version
 	if currentHeight == 0 {
@@ -119,6 +116,7 @@ func (m *Multiplexer) getAppForHeight(height int64) (servertypes.ABCI, error) {
 
 	// use the latest app if the height is beyond all defined versions
 	if m.versions.ShouldLatestApp(height) {
+		// TODO: maybe start the latest app here if not already started
 		return m.latestApp, nil
 	}
 

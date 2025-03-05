@@ -25,7 +25,6 @@ type Appd struct {
 
 // New takes a binary and untar it in a temporary directory.
 func New(name string, bin []byte, cfg ...CfgOption) (*Appd, error) {
-
 	if len(bin) == 0 {
 		var err error
 		bin, err = CelestiaApp()

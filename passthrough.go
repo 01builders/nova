@@ -30,7 +30,7 @@ Use --version to specify a named version or --height to execute on the version a
 				return errors.New("no command specified to pass through")
 			}
 
-			if strings.Contains("start", args[0]) {
+			if strings.EqualFold("start", args[0]) {
 				return errors.New("cannot passthrough start command")
 			}
 
