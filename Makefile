@@ -6,8 +6,8 @@ test:
 	$(GO) test ./... -v
 
 # Run tests with coverage
-test-coverage:
-	$(GO) tool cover -func=coverage.out
+test-cover:
+	$(GO) test ./... -cover
 
 # lint code with golangci-lint
 lint-fix:
