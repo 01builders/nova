@@ -25,7 +25,6 @@ type Appd struct {
 
 // New takes a binary and untar it in a temporary directory.
 func New(name string, bin []byte, cfg ...CfgOption) (*Appd, error) {
-
 	if len(bin) == 0 {
 		var err error
 		bin, err = CelestiaApp()
@@ -143,9 +142,9 @@ func New(name string, bin []byte, cfg ...CfgOption) (*Appd, error) {
 	return appd, nil
 }
 
-// Run starts the appd binary with the given arguments.
-func (a *Appd) Run(args ...string) error {
-	cmd := exec.Command(a.path, args...)
+// Start starts the appd binary with the given arguments.
+func (a *Appd) Start(args ...string) error {
+	cmd := exec.Command(a.path, append([]string{"start"}, args...)...)
 
 	// Set up I/O
 	cmd.Stdin = a.stdin

@@ -11,50 +11,41 @@ import (
 	"github.com/01builders/nova/abci"
 )
 
-const (
-	flagVersion = "version"
-	flagHeight  = "height"
-)
-
 // NewPassthroughCmd creates a command that allows executing commands on any app version.
 // This enables direct interaction with older app versions for debugging or older queries.
 func NewPassthroughCmd(versions abci.Versions) *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "passthrough [command]",
-		Short: "Execute a command on a specific app version",
+		Use:                "passthrough [version/height] [command]",
+		Args:               cobra.MinimumNArgs(1),
+		DisableFlagParsing: true,
+		Short:              "Execute a command on a specific app version",
 		Long: `Execute a command on a specific app version.
 This allows interacting with older app versions for debugging or older queries.
-Use --version to specify a named version or --height to execute on the version active at a specific height.`,
+Use a version name to specify a named version or a height to execute on the version active at a specific height as first argument.`,
+		Example: `passsthrough v3 status`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if len(args) == 0 {
-				return errors.New("no command specified to pass through")
-			}
-
-			if strings.Contains("start", args[0]) {
+			if len(args) >= 2 && strings.EqualFold("start", args[1]) {
 				return errors.New("cannot passthrough start command")
 			}
 
 			// Get the version name or determine from height
-			versionName := cmd.Flags().Lookup(flagVersion).Value.String()
-			heightStr := cmd.Flags().Lookup(flagHeight).Value.String()
+			versionName := args[0]
+			height, errParseHeight := strconv.ParseInt(versionName, 10, 64)
 
-			var appVersion abci.Version
-			var found bool
+			var (
+				appVersion abci.Version
+				found      bool
+				err        error
+			)
 
 			// Determine which version to use based on flags
-			if versionName != "" {
+			if versionName != "" && height == 0 {
 				// Get by name
 				appVersion, found = versions[versionName]
 				if !found {
 					return fmt.Errorf("version %s not found", versionName)
 				}
-			} else if heightStr != "" {
-				// Get by height
-				height, err := strconv.ParseInt(heightStr, 10, 64)
-				if err != nil {
-					return fmt.Errorf("invalid height %s: %w", heightStr, err)
-				}
-
+			} else if errParseHeight == nil { // Get by height
 				if versions.ShouldLatestApp(height) {
 					return fmt.Errorf("height %d requires the latest app, use the command directly without passthrough", height)
 				}
@@ -73,15 +64,10 @@ Use --version to specify a named version or --height to execute on the version a
 			}
 
 			// prepare the command to be executed
-			execCmd := appVersion.Appd.CreateExecCommand(args...)
+			execCmd := appVersion.Appd.CreateExecCommand(args[1:]...)
 			return execCmd.Run()
 		},
 	}
-
-	cmd.Flags().String(flagVersion, "", "App version name to execute the command on")
-	cmd.Flags().Int64(flagHeight, 0, "Blockchain height to determine which app version to use")
-	cmd.MarkFlagsMutuallyExclusive(flagVersion, flagHeight)
-	cmd.MarkFlagsOneRequired(flagVersion, flagHeight)
 
 	return cmd
 }

@@ -10,6 +10,7 @@ import (
 	"syscall"
 
 	"cosmossdk.io/log"
+	"cosmossdk.io/store/rootmulti"
 	"github.com/01builders/nova/abci"
 	cmtabci "github.com/cometbft/cometbft/abci/types"
 	cmtcfg "github.com/cometbft/cometbft/config"
@@ -21,6 +22,7 @@ import (
 	cmttypes "github.com/cometbft/cometbft/types"
 	dbm "github.com/cosmos/cosmos-db"
 	"github.com/hashicorp/go-metrics"
+	"github.com/spf13/viper"
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
@@ -39,8 +41,6 @@ import (
 )
 
 const (
-	flagAddress    = "address"
-	flagTransport  = "transport"
 	flagTraceStore = "trace-store"
 	flagGRPCOnly   = "grpc-only"
 )
@@ -67,11 +67,30 @@ func start(versions abci.Versions, svrCtx *server.Context, clientCtx client.Cont
 		return err
 	}
 
-	app, appCleanupFn, err := startApp(svrCtx, appCreator)
+	// get the current height - do this ONCE to avoid opening DB multiple times
+	height, err := getCurrentHeight(svrCtx.Config.RootDir, svrCtx.Viper)
 	if err != nil {
-		return err
+		svrCtx.Logger.Info("Could not get current height, assuming genesis", "err", err)
+		height = 0
 	}
-	defer appCleanupFn()
+
+	// Check if we should use latest app or not
+	usesLatestApp := versions.ShouldLatestApp(height)
+	svrCtx.Logger.Info("Determining app version to use",
+		"height", height,
+		"usesLatestApp", usesLatestApp)
+
+	// Only start the app if we need it
+	var app types.Application
+	var appCleanupFn func()
+
+	if usesLatestApp {
+		app, appCleanupFn, err = startApp(svrCtx, appCreator)
+		if err != nil {
+			return err
+		}
+		defer appCleanupFn()
+	}
 
 	metrics, err := startTelemetry(svrCfg)
 	if err != nil {
@@ -80,10 +99,25 @@ func start(versions abci.Versions, svrCtx *server.Context, clientCtx client.Cont
 
 	emitServerInfoMetrics()
 
-	return startInProcess(versions, svrCtx, svrCfg, clientCtx, app, metrics)
+	return startInProcess(versions, height, svrCtx, svrCfg, clientCtx, app, metrics)
 }
 
-func startInProcess(versions abci.Versions, svrCtx *server.Context, svrCfg serverconfig.Config, clientCtx client.Context, app types.Application,
+func getCurrentHeight(rootDir string, v *viper.Viper) (int64, error) {
+	db, err := openDB(rootDir, server.GetAppDBBackend(v))
+	if err != nil {
+		return 0, err
+	}
+
+	return rootmulti.GetLatestVersion(db), db.Close()
+}
+
+func startInProcess(
+	versions abci.Versions,
+	currentHeight int64,
+	svrCtx *server.Context,
+	svrCfg serverconfig.Config,
+	clientCtx client.Context,
+	app types.Application,
 	metrics *telemetry.Metrics,
 ) error {
 	cmtCfg := svrCtx.Config
@@ -92,12 +126,11 @@ func startInProcess(versions abci.Versions, svrCtx *server.Context, svrCfg serve
 	g, ctx := getCtx(svrCtx, true)
 
 	if gRPCOnly {
-		// TODO: Generalize logic so that gRPC only is really in startStandAlone
 		svrCtx.Logger.Info("starting node in gRPC only mode; CometBFT is disabled")
 		svrCfg.GRPC.Enable = true
 	} else {
 		svrCtx.Logger.Info("starting node with ABCI CometBFT in-process")
-		tmNode, cleanupFn, err := startCmtNode(versions, ctx, cmtCfg, app, svrCtx)
+		tmNode, cleanupFn, err := startCmtNode(versions, currentHeight, ctx, cmtCfg, app, svrCtx)
 		if err != nil {
 			return err
 		}
@@ -134,6 +167,7 @@ func startInProcess(versions abci.Versions, svrCtx *server.Context, svrCfg serve
 
 func startCmtNode(
 	versions abci.Versions,
+	currentHeight int64,
 	ctx context.Context,
 	cfg *cmtcfg.Config,
 	app types.Application,
@@ -144,7 +178,13 @@ func startCmtNode(
 		return nil, cleanupFn, err
 	}
 
-	cmtApp, err := abci.NewMultiplexer(svrCtx.Logger.With("multiplexer"), app, versions, svrCtx.Viper, svrCtx.Config.RootDir)
+	cmtApp, err := abci.NewMultiplexer(
+		svrCtx.Logger.With("multiplexer"),
+		svrCtx.Viper,
+		app,
+		versions,
+		currentHeight,
+	)
 	if err != nil {
 		return nil, cleanupFn, err
 	}
@@ -283,7 +323,7 @@ func startGrpcServer(
 	}
 
 	// if gRPC is enabled, configure gRPC client for gRPC gateway
-	grpcClient, err := grpc.Dial( //nolint: staticcheck // ignore this line for this linter
+	grpcClient, err := grpc.NewClient(
 		config.Address,
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
 		grpc.WithDefaultCallOptions(

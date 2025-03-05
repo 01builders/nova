@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
 	"sync"
 
 	"github.com/spf13/viper"
@@ -13,23 +12,21 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 
 	"cosmossdk.io/log"
-	"cosmossdk.io/store/rootmulti"
 	abci "github.com/cometbft/cometbft/abci/types"
-	dbm "github.com/cosmos/cosmos-db"
-	"github.com/cosmos/cosmos-sdk/server"
 	servertypes "github.com/cosmos/cosmos-sdk/server/types"
 
 	"github.com/01builders/nova/appd"
 )
 
-const flagGRPCAddress = "grpc.address"
+// remoteFlags are the default flags for the remote app
+var remoteFlags = []string{"--grpc.enable=true", "--api.enable=false", "--api.swagger=false", "--with-tendermint=false", "--transport=grpc"}
 
 type Multiplexer struct {
 	logger log.Logger
 	mu     sync.Mutex
 
-	currentHeight, lastHeight int64
-	started                   bool
+	lastHeight int64
+	started    bool
 
 	latestApp     servertypes.ABCI
 	activeVersion Version
@@ -41,15 +38,16 @@ type Multiplexer struct {
 // NewMultiplexer creates a new ABCI wrapper for multiplexing
 func NewMultiplexer(
 	logger log.Logger,
+	v *viper.Viper,
 	latestApp servertypes.ABCI,
 	versions Versions,
-	v *viper.Viper,
-	home string,
+	currentHeight int64,
 ) (abci.Application, error) {
 	wrapper := &Multiplexer{
-		logger:    logger,
-		latestApp: latestApp,
-		versions:  versions,
+		logger:     logger,
+		latestApp:  latestApp,
+		versions:   versions,
+		lastHeight: currentHeight,
 	}
 
 	var (
@@ -57,31 +55,29 @@ func NewMultiplexer(
 		err            error
 	)
 
-	// check height from disk
-	wrapper.lastHeight, err = wrapper.getLatestHeight(home, v) // if error assume genesis
-	if err != nil {
-		logger.Info(fmt.Sprintf("failed to get latest height from disk, assuming genesis: %v\n", err))
-	}
-
 	// prepare correct version
-	if wrapper.lastHeight == 0 {
+	if currentHeight == 0 {
 		currentVersion, err = versions.GenesisVersion()
 	} else {
-		currentVersion, err = versions.GetForHeight(wrapper.lastHeight)
+		currentVersion, err = versions.GetForHeight(currentHeight)
 	}
 	if err != nil && errors.Is(err, ErrNoVersionFound) {
 		return wrapper, nil // no version found, assume latest
 	} else if err != nil {
-		return nil, fmt.Errorf("failed to get app for height %d: %w", wrapper.lastHeight, err)
+		return nil, fmt.Errorf("failed to get app for height %d: %w", currentHeight, err)
 	}
 
 	// prepare remote app client
+	const flagGRPCAddress = "grpc.address"
 	grpcAddress := v.GetString(flagGRPCAddress)
 	if grpcAddress == "" {
 		grpcAddress = "localhost:9090"
 	}
 
-	conn, err := grpc.NewClient(grpcAddress, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	conn, err := grpc.NewClient(
+		grpcAddress,
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to prepare app connection: %w", err)
 	}
@@ -94,7 +90,11 @@ func NewMultiplexer(
 			programArgs = os.Args[2:] // remove 'appd start' args
 		}
 
-		if err := currentVersion.Appd.Run(append(programArgs, currentVersion.StartArgs...)...); err != nil {
+		if len(currentVersion.StartArgs) == 0 {
+			currentVersion.StartArgs = remoteFlags
+		}
+
+		if err := currentVersion.Appd.Start(append(programArgs, currentVersion.StartArgs...)...); err != nil {
 			return nil, fmt.Errorf("failed to start app: %w", err)
 		}
 
@@ -109,27 +109,14 @@ func NewMultiplexer(
 	return wrapper, nil
 }
 
-func (m *Multiplexer) getLatestHeight(rootDir string, v *viper.Viper) (int64, error) {
-	dataDir := filepath.Join(rootDir, "data")
-	db, err := dbm.NewDB("application", server.GetAppDBBackend(v), dataDir)
-	if err != nil {
-		return 0, err
-	}
-
-	height := rootmulti.GetLatestVersion(db)
-
-	return height, db.Close()
-}
-
 // getAppForHeight gets the appropriate app based on height
 func (m *Multiplexer) getAppForHeight(height int64) (servertypes.ABCI, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	m.currentHeight = height
-
 	// use the latest app if the height is beyond all defined versions
 	if m.versions.ShouldLatestApp(height) {
+		// TODO: maybe start the latest app here if not already started
 		return m.latestApp, nil
 	}
 
@@ -148,7 +135,7 @@ func (m *Multiplexer) getAppForHeight(height int64) (servertypes.ABCI, error) {
 		// check if an app is already started
 		// stop the app if it's running
 		if m.activeVersion.Appd != nil && m.activeVersion.Appd.Pid() != appd.AppdStopped {
-			m.logger.Info(fmt.Sprintf("Stopping app for height %d", m.activeVersion.UntilHeight))
+			m.logger.Info("Stopping app for height", "height", m.activeVersion.UntilHeight)
 			if err := m.activeVersion.Appd.Stop(); err != nil {
 				return nil, fmt.Errorf("failed to stop app for height %d: %w", m.activeVersion.UntilHeight, err)
 			}
@@ -160,7 +147,7 @@ func (m *Multiplexer) getAppForHeight(height int64) (servertypes.ABCI, error) {
 			if currentVersion.PreHandler != "" {
 				preCmd := currentVersion.Appd.CreateExecCommand(currentVersion.PreHandler)
 				if err := preCmd.Run(); err != nil {
-					m.logger.Info(fmt.Sprintf("Warning: PreHandler failed: %v", err))
+					m.logger.Info("Warning: PreHandler failed", "err", err)
 					// Continue anyway as the pre-handler might be optional
 				}
 			}
@@ -171,7 +158,11 @@ func (m *Multiplexer) getAppForHeight(height int64) (servertypes.ABCI, error) {
 				programArgs = os.Args[2:] // Remove 'appd start' args
 			}
 
-			if err := currentVersion.Appd.Run(append(programArgs, currentVersion.StartArgs...)...); err != nil {
+			if len(currentVersion.StartArgs) == 0 {
+				currentVersion.StartArgs = remoteFlags
+			}
+
+			if err := currentVersion.Appd.Start(append(programArgs, currentVersion.StartArgs...)...); err != nil {
 				return nil, fmt.Errorf("failed to start app for height %d: %w", height, err)
 			}
 
@@ -196,7 +187,7 @@ func (m *Multiplexer) Cleanup() error {
 
 	// stop any running app
 	if m.activeVersion.Appd != nil && m.activeVersion.Appd.Pid() != appd.AppdStopped {
-		m.logger.Info(fmt.Sprintf("Stopping app for height %d", m.activeVersion.UntilHeight))
+		m.logger.Info("Stopping app for height", "height", m.activeVersion.UntilHeight)
 		if err := m.activeVersion.Appd.Stop(); err != nil {
 			errs = errors.Join(errs, fmt.Errorf("failed to stop app for height %d: %w", m.activeVersion.UntilHeight, err))
 		}
@@ -258,7 +249,12 @@ func (m *Multiplexer) FinalizeBlock(_ context.Context, req *abci.RequestFinalize
 }
 
 func (m *Multiplexer) Info(_ context.Context, req *abci.RequestInfo) (*abci.ResponseInfo, error) {
-	return m.latestApp.Info(req) // Always use latest app for Info
+	app, err := m.getAppForHeight(m.lastHeight)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get app for height %d: %w", m.lastHeight, err)
+	}
+
+	return app.Info(req)
 }
 
 func (m *Multiplexer) InitChain(_ context.Context, req *abci.RequestInitChain) (*abci.ResponseInitChain, error) {
