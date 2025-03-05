@@ -5,49 +5,47 @@ on:
       - main
   pull_request:
 jobs:
-  build-celestia:
+  test:
     runs-on: ubuntu-latest
     steps:
+      - name: Checkout Nova Repository
+        uses: actions/checkout@v4
+        with:
+          repository: "01builders/nova"
+          path: "nova"
+
       - name: Checkout Celestia App Repository
         uses: actions/checkout@v4
         with:
-          # TODO: change this to celestia repo when feature branch is merged.
           repository: "01builders/celestia-app"
-          ref: "sdk-v0.50.x"
+          path: "celestia-app"
 
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version-file: 'go.mod'
+          go-version: "stable"
 
-        # TODO: this can be replaced with fetching a released binary instead of building.
       - name: Build Celestia App Binary
-        run: make build
+        run: |
+          cd celestia-app
+          # TODO: we can pull from released binaries in the future rather than building.
+          make build
+          mkdir -p $HOME/bin
+          mv build/celestia-appd $HOME/bin/
 
-      - name: Archive Celestia Binary
-        run: tar -czvf celestia-app_Linux_x86_64.tar.gz build/celestia-appd
+      - name: Archive Celestia App Binary
+        run: |
+          cd $HOME/bin
+          tar -czvf celestia-app_Linux_x86_64.tar.gz celestia-appd
 
-      - name: Upload Celestia Binary as Artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: celestia-binary-tar
-          path: celestia-app_Linux_x86_64.tar.gz
+      - name: Copy Binary to Nova Repo
+        run: |
+          # remove all binaries in the repo.
+          rm nova/appd/celestia-app_*
+          # copy over the one we just built.
+          cp $HOME/bin/celestia-app_Linux_x86_64.tar.gz nova/appd
 
-  test:
-    runs-on: ubuntu-latest
-    needs: build-celestia
-    steps:
-      - name: Checkout Repo
-        uses: actions/checkout@v4
-      - name: Setup Go
-        uses: actions/setup-go@v5
-        with:
-          # always use the version specified in the go mod.
-          go-version-file: 'go.mod'
-      - name: Download Celestia Binary Archive
-        uses: actions/download-artifact@v4
-        with:
-          name: celestia-binary-tar
-          # replace the existing archive in the appd directory.
-          path: appd/celestia-app_Linux_x86_64.tar.gz
-      - run: make test-cover
+      - name: Run Tests
+        run: |
+          cd nova
+          make test-cover
