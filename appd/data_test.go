@@ -1,15 +1,55 @@
 package appd
 
 import (
-	"github.com/stretchr/testify/assert"
+	"fmt"
 	"github.com/stretchr/testify/require"
 	"testing"
 )
 
 func TestCelestiaApp(t *testing.T) {
-	t.Logf("running on platform: %s", platform())
-	data, err := CelestiaApp()
-	require.NoError(t, err, "CelestiaApp should not return an error")
-	require.NotNil(t, data, "CelestiaApp should return non-nil data")
-	assert.NotEmpty(t, data, "CelestiaApp should return non-empty binary data")
+	// prevent messing with other tests by modifying this.
+	realData := binaryCompressed
+	defer func() {
+		binaryCompressed = realData
+	}()
+
+	tests := []struct {
+		name          string
+		modifyFn      func()
+		expectedError error
+	}{
+		{
+			name: "Valid binary data",
+			modifyFn: func() {
+				binaryCompressed = realData
+			},
+			expectedError: nil,
+		},
+		{
+			name: "nil binaryCompressed",
+			modifyFn: func() {
+				binaryCompressed = nil
+			},
+			expectedError: fmt.Errorf("no binary data available for platform %s", platform()),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+
+			tt.modifyFn()
+
+			data, err := CelestiaApp()
+
+			if tt.expectedError != nil {
+				require.Error(t, err)
+				require.Equal(t, err, tt.expectedError)
+				require.Nil(t, data)
+			} else {
+				require.NoError(t, err)
+				require.NotNil(t, data)
+				require.NotEmpty(t, data)
+			}
+		})
+	}
 }

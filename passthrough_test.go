@@ -3,7 +3,6 @@ package nova
 import (
 	"bytes"
 	"github.com/01builders/nova/appd"
-	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"testing"
 
@@ -81,10 +80,10 @@ func TestNewPassthroughCmd(t *testing.T) {
 
 			if tt.expectedErrStr != "" {
 				require.Error(t, err)
-				assert.Contains(t, err.Error(), tt.expectedErrStr)
+				require.Contains(t, err.Error(), tt.expectedErrStr)
 			} else {
 				require.NoError(t, err)
-				assert.Contains(t, output, tt.expectedOutput)
+				require.Contains(t, output, tt.expectedOutput)
 			}
 		})
 	}

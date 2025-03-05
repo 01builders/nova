@@ -48,7 +48,7 @@ func New(name string, bin []byte, cfg ...CfgOption) (*Appd, error) {
 
 	// cleanups functions
 	cleanup := func() {
-		os.RemoveAll(tmpDir)
+		_ = os.RemoveAll(tmpDir)
 	}
 
 	defer func() {
