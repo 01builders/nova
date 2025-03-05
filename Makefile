@@ -7,7 +7,7 @@ test:
 
 # Run tests with coverage
 test-cover:
-	$(GO) test ./... -cover
+	$(GO) test ./... -cover -v
 
 # lint code with golangci-lint
 lint-fix:
