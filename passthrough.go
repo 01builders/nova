@@ -54,8 +54,6 @@ Use a version name to specify a named version or a height to execute on the vers
 				if err != nil {
 					return fmt.Errorf("no version found for height %d: %w", height, err)
 				}
-			} else {
-				return errors.New("either --version or --height must be specified")
 			}
 
 			// ensure we have a valid appd instance

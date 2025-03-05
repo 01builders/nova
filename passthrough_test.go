@@ -2,13 +2,12 @@ package nova
 
 import (
 	"github.com/01builders/nova/appd"
-	"testing"
-
-	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"testing"
 
 	"github.com/01builders/nova/abci"
+	"github.com/spf13/cobra"
 )
 
 func TestNewPassthroughCmd(t *testing.T) {
@@ -24,53 +23,37 @@ func TestNewPassthroughCmd(t *testing.T) {
 			name:           "required arguments not specified",
 			args:           []string{},
 			versions:       make(abci.Versions),
-			expectedErrStr: "[version height] is required",
+			expectedErrStr: "requires at least 1 arg(s), only received 0",
 		},
 		{
-			name:           "no version specified",
-			args:           []string{"--version"},
-			versions:       make(abci.Versions),
-			expectedErrStr: "flag needs an argument: --version",
-		},
-		{
-			name:           "empty version specified",
-			args:           []string{"--version", "", "query", "account"},
-			versions:       make(abci.Versions),
-			expectedErrStr: "either --version or --height must be specified",
-		},
-		{
-			name:           "empty version specified with spaces",
-			args:           []string{"--version", "   ", "query", "account"},
-			versions:       make(abci.Versions),
-			expectedErrStr: "either --version or --height must be specified",
-		},
-		{
-			name:           "no height specified",
-			args:           []string{"--height"},
-			versions:       make(abci.Versions),
-			expectedErrStr: "flag needs an argument: --height",
-		},
-		{
-			name:           "cannot specify both height and version",
-			args:           []string{"--height", "0", "--version", "1"},
-			versions:       make(abci.Versions),
-			expectedErrStr: "if any flags in the group [version height] are set none of the others can be; [height version] were all set",
-		},
-		{
-			name:           "cannot passthrough start command",
-			args:           []string{"start", "--height", "0"},
+			name:           "cannot passthrough start command with version",
+			args:           []string{"v4", "start"},
 			versions:       make(abci.Versions),
 			expectedErrStr: "cannot passthrough start command",
 		},
 		{
-			name:           "invalid height value",
-			args:           []string{"--height", "abc"},
+			name:           "cannot passthrough start command with height",
+			args:           []string{"100", "start"},
 			versions:       make(abci.Versions),
-			expectedErrStr: `invalid argument "abc" for "--height`,
+			expectedErrStr: "cannot passthrough start command",
+		},
+		{
+			name:           "version not found no versions",
+			args:           []string{"v1"},
+			versions:       make(abci.Versions),
+			expectedErrStr: "version v1 not found",
+		},
+		{
+			name: "version not found existing versions",
+			args: []string{"v1"},
+			versions: abci.Versions{
+				"v2": newVersion(50, &appd.Appd{}),
+			},
+			expectedErrStr: "version v1 not found",
 		},
 		{
 			name: "should not use latest version with lower height",
-			args: []string{"--height", "100", "query", "account"},
+			args: []string{"100", "query", "account"},
 			versions: abci.Versions{
 				"v1": newVersion(50, &appd.Appd{}),
 			},
@@ -78,7 +61,7 @@ func TestNewPassthroughCmd(t *testing.T) {
 		},
 		{
 			name: "underlying appd is nil",
-			args: []string{"--height", "50", "query", "account"},
+			args: []string{"50", "query", "account"},
 			versions: abci.Versions{
 				"v1": newVersion(50, nil),
 			},
