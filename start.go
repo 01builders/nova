@@ -41,8 +41,6 @@ import (
 )
 
 const (
-	flagAddress    = "address"
-	flagTransport  = "transport"
 	flagTraceStore = "trace-store"
 	flagGRPCOnly   = "grpc-only"
 )
@@ -105,15 +103,12 @@ func start(versions abci.Versions, svrCtx *server.Context, clientCtx client.Cont
 }
 
 func getCurrentHeight(rootDir string, v *viper.Viper) (int64, error) {
-	dataDir := filepath.Join(rootDir, "data")
-	db, err := dbm.NewDB("application", server.GetAppDBBackend(v), dataDir)
+	db, err := openDB(rootDir, server.GetAppDBBackend(v))
 	if err != nil {
 		return 0, err
 	}
 
-	height := rootmulti.GetLatestVersion(db)
-
-	return height, db.Close()
+	return rootmulti.GetLatestVersion(db), db.Close()
 }
 
 func startInProcess(
@@ -131,7 +126,6 @@ func startInProcess(
 	g, ctx := getCtx(svrCtx, true)
 
 	if gRPCOnly {
-		// TODO: Generalize logic so that gRPC only is really in startStandAlone
 		svrCtx.Logger.Info("starting node in gRPC only mode; CometBFT is disabled")
 		svrCfg.GRPC.Enable = true
 	} else {
