@@ -5,11 +5,50 @@ on:
       - main
   pull_request:
 jobs:
+
+  build-celestia:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Celestia App Repository
+        uses: actions/checkout@v4
+        with:
+          # TODO: change this to celestia repo when feature branch is merged.
+          repository: "01builders/celestia-app"
+          ref: "sdk-v0.50.x"
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: 'go.mod'
+
+      - name: Build Celestia App Binary
+        run: make build
+
+      - name: Archive Celestia Binary
+        run: tar -czvf celestia-app_Linux_x86_64.tar.gz build/celestia-appd
+
+      - name: Upload Celestia Binary as Artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: celestia-binary-tar
+          path: celestia-app_Linux_x86_64.tar.gz
+
   test:
     runs-on: ubuntu-latest
+    depends-on: build-celestia
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - name: Checkout Repo
+        uses: actions/checkout@v4
+      - name: Setup Go
+        uses: actions/setup-go@v5
         with:
-          go-version: "stable"
+          # always use the version specified in the go mod.
+          go-version-file: 'go.mod'
+      - name: Download Celestia Binary Archive
+        uses: actions/download-artifact@v3
+        with:
+          name: celestia-binary-tar
+          # replace the existing archive in the appd directory.
+          path: appd/celestia-app_Linux_x86_64.tar.gz
       - run: make test-cover
