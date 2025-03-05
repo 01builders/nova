@@ -41,8 +41,6 @@ import (
 )
 
 const (
-	flagAddress    = "address"
-	flagTransport  = "transport"
 	flagTraceStore = "trace-store"
 	flagGRPCOnly   = "grpc-only"
 )

@@ -19,7 +19,7 @@ import (
 )
 
 // remoteFlags are the default flags for the remote app
-var remoteFlags = []string{"--grpc.enable=true", "--api.enable=false", "--api.swagger=false", "--with-tendermint=false"}
+var remoteFlags = []string{"--grpc.enable=true", "--api.enable=false", "--api.swagger=false", "--with-tendermint=false", "--transport=grpc"}
 
 type Multiplexer struct {
 	logger log.Logger
