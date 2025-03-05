@@ -5,10 +5,8 @@ on:
       - main
   pull_request:
 jobs:
-
   build-celestia:
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout Celestia App Repository
         uses: actions/checkout@v4
@@ -29,7 +27,7 @@ jobs:
         run: tar -czvf celestia-app_Linux_x86_64.tar.gz build/celestia-appd
 
       - name: Upload Celestia Binary as Artifact
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: celestia-binary-tar
           path: celestia-app_Linux_x86_64.tar.gz
