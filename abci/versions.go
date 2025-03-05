@@ -45,6 +45,7 @@ func (v Versions) GetForHeight(height int64) (Version, error) {
 	for _, version := range v {
 		if version.UntilHeight >= height {
 			selectedVersion = version
+			break
 		}
 	}
 
