@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"testing"
 
-	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -48,7 +47,7 @@ func TestCfgOptions(t *testing.T) {
 			appdInstance = tt.option(appdInstance)
 
 			require.NotNil(t, appdInstance, "Appd instance should not be nil")
-			assert.True(t, tt.expected(appdInstance), "Expected configuration was not applied")
+			require.True(t, tt.expected(appdInstance), "Expected configuration was not applied")
 		})
 	}
 }

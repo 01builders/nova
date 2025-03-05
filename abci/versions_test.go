@@ -3,7 +3,6 @@ package abci
 import (
 	"testing"
 
-	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -43,10 +42,10 @@ func TestGenesisVersion(t *testing.T) {
 
 			if tt.expectedErr != nil {
 				require.Error(t, err)
-				assert.ErrorIs(t, err, tt.expectedErr)
+				require.ErrorIs(t, err, tt.expectedErr)
 			} else {
 				require.NoError(t, err)
-				assert.Equal(t, tt.expectedVer, version)
+				require.Equal(t, tt.expectedVer, version)
 			}
 		})
 	}
@@ -101,10 +100,10 @@ func TestGetForHeight(t *testing.T) {
 
 			if tt.expectedErr != nil {
 				require.Error(t, err)
-				assert.ErrorIs(t, err, tt.expectedErr)
+				require.ErrorIs(t, err, tt.expectedErr)
 			} else {
 				require.NoError(t, err)
-				assert.Equal(t, tt.expectedVer, version)
+				require.Equal(t, tt.expectedVer, version)
 			}
 		})
 	}
@@ -155,7 +154,7 @@ func TestShouldLatestApp(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			result := tt.versions.ShouldLatestApp(tt.height)
-			assert.Equal(t, tt.expected, result)
+			require.Equal(t, tt.expected, result)
 		})
 	}
 }
