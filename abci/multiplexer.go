@@ -135,7 +135,7 @@ func (m *Multiplexer) getAppForHeight(height int64) (servertypes.ABCI, error) {
 		// check if an app is already started
 		// stop the app if it's running
 		if m.activeVersion.Appd != nil && m.activeVersion.Appd.Pid() != appd.AppdStopped {
-			m.logger.Info(fmt.Sprintf("Stopping app for height %d", m.activeVersion.UntilHeight))
+			m.logger.Info("Stopping app for height", "height", m.activeVersion.UntilHeight)
 			if err := m.activeVersion.Appd.Stop(); err != nil {
 				return nil, fmt.Errorf("failed to stop app for height %d: %w", m.activeVersion.UntilHeight, err)
 			}
@@ -147,7 +147,7 @@ func (m *Multiplexer) getAppForHeight(height int64) (servertypes.ABCI, error) {
 			if currentVersion.PreHandler != "" {
 				preCmd := currentVersion.Appd.CreateExecCommand(currentVersion.PreHandler)
 				if err := preCmd.Run(); err != nil {
-					m.logger.Info(fmt.Sprintf("Warning: PreHandler failed: %v", err))
+					m.logger.Info("Warning: PreHandler failed", "err", err)
 					// Continue anyway as the pre-handler might be optional
 				}
 			}
@@ -187,7 +187,7 @@ func (m *Multiplexer) Cleanup() error {
 
 	// stop any running app
 	if m.activeVersion.Appd != nil && m.activeVersion.Appd.Pid() != appd.AppdStopped {
-		m.logger.Info(fmt.Sprintf("Stopping app for height %d", m.activeVersion.UntilHeight))
+		m.logger.Info("Stopping app for height", "height", m.activeVersion.UntilHeight)
 		if err := m.activeVersion.Appd.Stop(); err != nil {
 			errs = errors.Join(errs, fmt.Errorf("failed to stop app for height %d: %w", m.activeVersion.UntilHeight, err))
 		}
