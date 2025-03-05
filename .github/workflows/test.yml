@@ -20,6 +20,7 @@ jobs:
         with:
           go-version-file: 'go.mod'
 
+        # TODO: this can be replaced with fetching a released binary instead of building.
       - name: Build Celestia App Binary
         run: make build
 
@@ -44,7 +45,7 @@ jobs:
           # always use the version specified in the go mod.
           go-version-file: 'go.mod'
       - name: Download Celestia Binary Archive
-        uses: actions/download-artifact@v3
+        uses: actions/download-artifact@v4
         with:
           name: celestia-binary-tar
           # replace the existing archive in the appd directory.
