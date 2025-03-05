@@ -65,3 +65,19 @@ func (v Versions) ShouldLatestApp(height int64) bool {
 	}
 	return true
 }
+
+// GetStartArgs returns the appropriate args.
+func (v Version) GetStartArgs(args []string) []string {
+	if len(v.StartArgs) > 0 {
+		return v.StartArgs
+	}
+
+	// Default flags for standalone apps.
+	return []string{
+		"--grpc.enable=true",
+		"--api.enable=false",
+		"--api.swagger=false",
+		"--with-tendermint=false",
+		"--transport=grpc",
+	}
+}
