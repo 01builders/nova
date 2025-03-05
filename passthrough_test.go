@@ -1,6 +1,7 @@
 package nova
 
 import (
+	"bytes"
 	"github.com/01builders/nova/appd"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -74,6 +75,8 @@ func TestNewPassthroughCmd(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 
 			cmd := NewPassthroughCmd(tt.versions)
+			cmd.SetOut(&bytes.Buffer{})
+			cmd.SetErr(&bytes.Buffer{})
 			output, err := executeCommand(cmd, tt.args...)
 
 			if tt.expectedErrStr != "" {
