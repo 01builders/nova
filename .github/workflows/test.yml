@@ -18,6 +18,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: "01builders/celestia-app"
+          ref: "sdk-v0.50.x" # TODO: for now explicitly checkout the feature branch.
           path: "celestia-app"
 
       - name: Set up Go
