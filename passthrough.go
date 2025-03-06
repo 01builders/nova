@@ -13,7 +13,11 @@ import (
 
 // NewPassthroughCmd creates a command that allows executing commands on any app version.
 // This enables direct interaction with older app versions for debugging or older queries.
-func NewPassthroughCmd(versions abci.Versions) *cobra.Command {
+func NewPassthroughCmd(versions abci.Versions) (*cobra.Command, error) {
+	if err := versions.Validate(); err != nil {
+		return nil, fmt.Errorf("invalid versions: %w", err)
+	}
+
 	cmd := &cobra.Command{
 		Use:                "passthrough [version/height] [command]",
 		Args:               cobra.MinimumNArgs(1),
@@ -34,16 +38,15 @@ Use a version name to specify a named version or a height to execute on the vers
 
 			var (
 				appVersion abci.Version
-				found      bool
 				err        error
 			)
 
 			// Determine which version to use based on flags
 			if versionName != "" && height == 0 {
 				// Get by name
-				appVersion, found = versions[versionName]
-				if !found {
-					return fmt.Errorf("version %s not found", versionName)
+				appVersion, err = versions.GetForName(versionName)
+				if err != nil {
+					return fmt.Errorf("version %s not found: %w", versionName, err)
 				}
 			} else if errParseHeight == nil { // Get by height
 				if versions.ShouldLatestApp(height) {
@@ -67,5 +70,5 @@ Use a version name to specify a named version or a height to execute on the vers
 		},
 	}
 
-	return cmd
+	return cmd, nil
 }

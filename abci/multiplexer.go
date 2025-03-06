@@ -40,10 +40,15 @@ func NewMultiplexer(
 	versions Versions,
 	currentHeight int64,
 ) (abci.Application, error) {
+
+	if err := versions.Validate(); err != nil {
+		return nil, fmt.Errorf("invalid versions: %w", err)
+	}
+
 	wrapper := &Multiplexer{
 		logger:     logger,
 		latestApp:  latestApp,
-		versions:   versions,
+		versions:   versions.Sorted(),
 		lastHeight: currentHeight,
 	}
 

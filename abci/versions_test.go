@@ -1,6 +1,7 @@
 package abci
 
 import (
+	"errors"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -21,18 +22,18 @@ func TestGenesisVersion(t *testing.T) {
 		{
 			name: "Single genesis version",
 			versions: Versions{
-				"v1": {UntilHeight: 100},
+				{Name: "v1", UntilHeight: 100},
 			},
-			expectedVer: Version{UntilHeight: 100},
+			expectedVer: Version{Name: "v1", UntilHeight: 100},
 		},
 		{
 			name: "Find lowest UntilHeight",
 			versions: Versions{
-				"v1": {UntilHeight: 100},
-				"v2": {UntilHeight: 50}, // Genesis version
-				"v3": {UntilHeight: 150},
+				{Name: "v1", UntilHeight: 100},
+				{Name: "v2", UntilHeight: 50}, // Genesis version
+				{Name: "v3", UntilHeight: 150},
 			},
-			expectedVer: Version{UntilHeight: 50},
+			expectedVer: Version{Name: "v2", UntilHeight: 50},
 		},
 	}
 
@@ -50,7 +51,6 @@ func TestGenesisVersion(t *testing.T) {
 		})
 	}
 }
-
 func TestGetForHeight(t *testing.T) {
 	tests := []struct {
 		name        string
@@ -66,28 +66,38 @@ func TestGetForHeight(t *testing.T) {
 			expectedErr: ErrNoVersionFound,
 		},
 		{
-			name: "exact match for height",
+			name: "Exact match for height",
 			versions: Versions{
-				"v1": {UntilHeight: 100},
+				{Name: "v1", UntilHeight: 100},
 			},
 			height:      100,
-			expectedVer: Version{UntilHeight: 100},
+			expectedVer: Version{Name: "v1", UntilHeight: 100},
 		},
 		{
-			name: "find closest matching version",
+			name: "Find closest matching version",
 			versions: Versions{
-				"v1": {UntilHeight: 50},
-				"v2": {UntilHeight: 100},
-				"v3": {UntilHeight: 200},
+				{Name: "v1", UntilHeight: 50},
+				{Name: "v2", UntilHeight: 100},
+				{Name: "v3", UntilHeight: 200},
 			},
 			height:      75,
-			expectedVer: Version{UntilHeight: 100}, // Closest greater match
+			expectedVer: Version{Name: "v2", UntilHeight: 100}, // Closest greater match
+		},
+		{
+			name: "Find closest matching version using sorting",
+			versions: Versions{
+				{Name: "v1", UntilHeight: 50},
+				{Name: "v3", UntilHeight: 200},
+				{Name: "v2", UntilHeight: 100},
+			}.Sorted(),
+			height:      75,
+			expectedVer: Version{Name: "v2", UntilHeight: 100}, // Closest greater match
 		},
 		{
 			name: "No matching version for height",
 			versions: Versions{
-				"v1": {UntilHeight: 50},
-				"v2": {UntilHeight: 100},
+				{Name: "v1", UntilHeight: 50},
+				{Name: "v2", UntilHeight: 100},
 			},
 			height:      150,
 			expectedErr: ErrNoVersionFound,
@@ -108,7 +118,6 @@ func TestGetForHeight(t *testing.T) {
 		})
 	}
 }
-
 func TestShouldLatestApp(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -125,8 +134,8 @@ func TestShouldLatestApp(t *testing.T) {
 		{
 			name: "Height lower than all versions",
 			versions: Versions{
-				"v1": {UntilHeight: 100},
-				"v2": {UntilHeight: 200},
+				{Name: "v1", UntilHeight: 100},
+				{Name: "v2", UntilHeight: 200},
 			},
 			height:   50,
 			expected: false,
@@ -134,8 +143,8 @@ func TestShouldLatestApp(t *testing.T) {
 		{
 			name: "Height matches a version",
 			versions: Versions{
-				"v1": {UntilHeight: 100},
-				"v2": {UntilHeight: 200},
+				{Name: "v1", UntilHeight: 100},
+				{Name: "v2", UntilHeight: 200},
 			},
 			height:   100,
 			expected: false,
@@ -143,8 +152,8 @@ func TestShouldLatestApp(t *testing.T) {
 		{
 			name: "Height exceeds all versions",
 			versions: Versions{
-				"v1": {UntilHeight: 100},
-				"v2": {UntilHeight: 200},
+				{Name: "v1", UntilHeight: 100},
+				{Name: "v2", UntilHeight: 200},
 			},
 			height:   250,
 			expected: true,
@@ -155,6 +164,53 @@ func TestShouldLatestApp(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			result := tt.versions.ShouldLatestApp(tt.height)
 			require.Equal(t, tt.expected, result)
+		})
+	}
+}
+
+func TestEnsureUniqueNames(t *testing.T) {
+	tests := []struct {
+		name        string
+		versions    Versions
+		expectedErr error
+	}{
+		{
+			name:        "no duplicates",
+			versions:    []Version{{Name: "v1"}, {Name: "v2"}, {Name: "v3"}},
+			expectedErr: nil,
+		},
+		{
+			name:        "duplicate names",
+			versions:    []Version{{Name: "v1"}, {Name: "v2"}, {Name: "v1"}},
+			expectedErr: errors.New("version with name v1 specified multiple times"),
+		},
+		{
+			name:        "empty list",
+			versions:    []Version{},
+			expectedErr: nil,
+		},
+		{
+			name:        "single element",
+			versions:    []Version{{Name: "v1"}},
+			expectedErr: nil,
+		},
+		{
+			name:        "multiple duplicates",
+			versions:    []Version{{Name: "v1"}, {Name: "v2"}, {Name: "v1"}, {Name: "v3"}, {Name: "v2"}},
+			expectedErr: errors.New("version with name v1 specified multiple times"),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.versions.Validate()
+
+			if tt.expectedErr != nil {
+				require.Error(t, err)
+				require.Contains(t, err.Error(), tt.expectedErr.Error(), "expected error message mismatch")
+			} else {
+				require.NoError(t, err)
+			}
 		})
 	}
 }

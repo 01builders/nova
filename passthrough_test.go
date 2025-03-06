@@ -2,12 +2,12 @@ package nova
 
 import (
 	"bytes"
-	"github.com/01builders/nova/appd"
-	"github.com/stretchr/testify/require"
 	"testing"
 
 	"github.com/01builders/nova/abci"
+	"github.com/01builders/nova/appd"
 	"github.com/spf13/cobra"
+	"github.com/stretchr/testify/require"
 )
 
 func TestNewPassthroughCmd(t *testing.T) {
@@ -15,39 +15,38 @@ func TestNewPassthroughCmd(t *testing.T) {
 		name           string
 		args           []string
 		versions       abci.Versions
-		mockVersions   abci.Versions
 		expectedErrStr string
 		expectedOutput string
 	}{
 		{
 			name:           "required arguments not specified",
 			args:           []string{},
-			versions:       make(abci.Versions),
+			versions:       []abci.Version{},
 			expectedErrStr: "requires at least 1 arg(s), only received 0",
 		},
 		{
 			name:           "cannot passthrough start command with version",
 			args:           []string{"v4", "start"},
-			versions:       make(abci.Versions),
+			versions:       []abci.Version{},
 			expectedErrStr: "cannot passthrough start command",
 		},
 		{
 			name:           "cannot passthrough start command with height",
 			args:           []string{"100", "start"},
-			versions:       make(abci.Versions),
+			versions:       []abci.Version{},
 			expectedErrStr: "cannot passthrough start command",
 		},
 		{
 			name:           "version not found no versions",
 			args:           []string{"v1"},
-			versions:       make(abci.Versions),
+			versions:       []abci.Version{},
 			expectedErrStr: "version v1 not found",
 		},
 		{
 			name: "version not found existing versions",
 			args: []string{"v1"},
 			versions: abci.Versions{
-				"v2": newVersion(50, &appd.Appd{}),
+				newVersion("v2", 50, &appd.Appd{}),
 			},
 			expectedErrStr: "version v1 not found",
 		},
@@ -55,7 +54,7 @@ func TestNewPassthroughCmd(t *testing.T) {
 			name: "should not use latest version with lower height",
 			args: []string{"100", "query", "account"},
 			versions: abci.Versions{
-				"v1": newVersion(50, &appd.Appd{}),
+				newVersion("v1", 50, &appd.Appd{}),
 			},
 			expectedErrStr: "height 100 requires the latest app",
 		},
@@ -63,7 +62,7 @@ func TestNewPassthroughCmd(t *testing.T) {
 			name: "underlying appd is nil",
 			args: []string{"50", "query", "account"},
 			versions: abci.Versions{
-				"v1": newVersion(50, nil),
+				newVersion("v1", 50, nil),
 			},
 			expectedErrStr: "no binary available for version",
 		},
@@ -72,8 +71,8 @@ func TestNewPassthroughCmd(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-
-			cmd := NewPassthroughCmd(tt.versions)
+			
+			cmd, _ := NewPassthroughCmd(tt.versions)
 			cmd.SetOut(&bytes.Buffer{})
 			cmd.SetErr(&bytes.Buffer{})
 			output, err := executeCommand(cmd, tt.args...)
@@ -89,9 +88,10 @@ func TestNewPassthroughCmd(t *testing.T) {
 	}
 }
 
-// newVersion returns a new instance of abci.Version with the provided untilHeight and app.
-func newVersion(untilHeight int64, app *appd.Appd) abci.Version {
+// newVersion creates a new abci.Version with a name, untilHeight, and an optional appd instance.
+func newVersion(name string, untilHeight int64, app *appd.Appd) abci.Version {
 	return abci.Version{
+		Name:        name,
 		UntilHeight: untilHeight,
 		Appd:        app,
 	}
