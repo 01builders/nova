@@ -3,9 +3,8 @@ package abci
 import (
 	"errors"
 	"fmt"
-	"sort"
-
 	"github.com/01builders/nova/appd"
+	"sort"
 )
 
 // ErrNoVersionFound is returned when no remote version is found for a given height.
@@ -13,16 +12,17 @@ var ErrNoVersionFound = errors.New("no version found")
 
 // Version defines the configuration for remote apps.
 type Version struct {
+	Name        string
 	Appd        *appd.Appd
 	UntilHeight int64
 	PreHandler  string   // Command to run before starting the app
 	StartArgs   []string // Extra arguments to pass to the app
 }
 
-type Versions map[string]Version
+type Versions []Version
 
-// sorted returns a sorted slice of Versions, sorted by UntilHeight (ascending).
-func (v Versions) sorted() []Version {
+// Sorted returns a sorted slice of Versions, sorted by UntilHeight (ascending).
+func (v Versions) Sorted() Versions {
 	// convert map to slice
 	versionList := make([]Version, 0, len(v))
 	for _, ver := range v {
@@ -42,7 +42,7 @@ func (v Versions) GenesisVersion() (Version, error) {
 	var genesis Version
 	var minHeight int64 = -1
 
-	for _, version := range v.sorted() {
+	for _, version := range v {
 		if minHeight == -1 || version.UntilHeight < minHeight {
 			minHeight = version.UntilHeight
 			genesis = version
@@ -59,7 +59,7 @@ func (v Versions) GenesisVersion() (Version, error) {
 // GetForHeight returns the version for a given height.
 func (v Versions) GetForHeight(height int64) (Version, error) {
 	var selectedVersion Version
-	for _, version := range v.sorted() {
+	for _, version := range v {
 		if version.UntilHeight >= height {
 			selectedVersion = version
 			break
@@ -75,7 +75,7 @@ func (v Versions) GetForHeight(height int64) (Version, error) {
 
 // ShouldLatestApp returns true if the given height is higher than all version's UntilHeight.
 func (v Versions) ShouldLatestApp(height int64) bool {
-	for _, version := range v.sorted() {
+	for _, version := range v {
 		if version.UntilHeight >= height {
 			return false
 		}

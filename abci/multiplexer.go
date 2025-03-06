@@ -43,7 +43,7 @@ func NewMultiplexer(
 	wrapper := &Multiplexer{
 		logger:     logger,
 		latestApp:  latestApp,
-		versions:   versions,
+		versions:   versions.Sorted(),
 		lastHeight: currentHeight,
 	}
 
