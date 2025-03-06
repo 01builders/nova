@@ -40,6 +40,11 @@ func NewMultiplexer(
 	versions Versions,
 	currentHeight int64,
 ) (abci.Application, error) {
+
+	if err := ensureUniqueNames(versions); err != nil {
+		return nil, fmt.Errorf("invalid versions argument: %w", err)
+	}
+
 	wrapper := &Multiplexer{
 		logger:     logger,
 		latestApp:  latestApp,

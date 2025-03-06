@@ -108,3 +108,15 @@ func (v Version) GetStartArgs(args []string) []string {
 		"--transport=grpc",
 	)
 }
+
+// ensureUniqueNames checks for duplicate names in a slice of Versions.
+func ensureUniqueNames(versions []Version) error {
+	seen := make(map[string]struct{})
+	for _, v := range versions {
+		if _, exists := seen[v.Name]; exists {
+			return fmt.Errorf("version with name %s specified multiple times", v.Name)
+		}
+		seen[v.Name] = struct{}{}
+	}
+	return nil
+}

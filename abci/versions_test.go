@@ -1,6 +1,7 @@
 package abci
 
 import (
+	"errors"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -163,6 +164,53 @@ func TestShouldLatestApp(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			result := tt.versions.ShouldLatestApp(tt.height)
 			require.Equal(t, tt.expected, result)
+		})
+	}
+}
+
+func TestEnsureUniqueNames(t *testing.T) {
+	tests := []struct {
+		name        string
+		versions    []Version
+		expectedErr error
+	}{
+		{
+			name:        "no duplicates",
+			versions:    []Version{{Name: "v1"}, {Name: "v2"}, {Name: "v3"}},
+			expectedErr: nil,
+		},
+		{
+			name:        "duplicate names",
+			versions:    []Version{{Name: "v1"}, {Name: "v2"}, {Name: "v1"}},
+			expectedErr: errors.New("version with name v1 specified multiple times"),
+		},
+		{
+			name:        "empty list",
+			versions:    []Version{},
+			expectedErr: nil,
+		},
+		{
+			name:        "single element",
+			versions:    []Version{{Name: "v1"}},
+			expectedErr: nil,
+		},
+		{
+			name:        "multiple duplicates",
+			versions:    []Version{{Name: "v1"}, {Name: "v2"}, {Name: "v1"}, {Name: "v3"}, {Name: "v2"}},
+			expectedErr: errors.New("version with name v1 specified multiple times"),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := ensureUniqueNames(tt.versions)
+
+			if tt.expectedErr != nil {
+				require.Error(t, err)
+				require.Contains(t, err.Error(), tt.expectedErr.Error(), "expected error message mismatch")
+			} else {
+				require.NoError(t, err)
+			}
 		})
 	}
 }
