@@ -109,10 +109,10 @@ func (v Version) GetStartArgs(args []string) []string {
 	)
 }
 
-// ensureUniqueNames checks for duplicate names in a slice of Versions.
-func ensureUniqueNames(versions []Version) error {
+// Validate checks for duplicate names in a slice of Versions.
+func (v Versions) Validate() error {
 	seen := make(map[string]struct{})
-	for _, v := range versions {
+	for _, v := range v {
 		if _, exists := seen[v.Name]; exists {
 			return fmt.Errorf("version with name %s specified multiple times", v.Name)
 		}

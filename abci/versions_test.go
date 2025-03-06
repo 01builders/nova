@@ -171,7 +171,7 @@ func TestShouldLatestApp(t *testing.T) {
 func TestEnsureUniqueNames(t *testing.T) {
 	tests := []struct {
 		name        string
-		versions    []Version
+		versions    Versions
 		expectedErr error
 	}{
 		{
@@ -203,7 +203,7 @@ func TestEnsureUniqueNames(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := ensureUniqueNames(tt.versions)
+			err := tt.versions.Validate()
 
 			if tt.expectedErr != nil {
 				require.Error(t, err)
