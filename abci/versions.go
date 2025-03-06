@@ -3,6 +3,7 @@ package abci
 import (
 	"errors"
 	"fmt"
+	"sort"
 
 	"github.com/01builders/nova/appd"
 )
@@ -20,12 +21,28 @@ type Version struct {
 
 type Versions map[string]Version
 
+// sorted returns a sorted slice of Versions, sorted by UntilHeight (ascending).
+func (v Versions) sorted() []Version {
+	// convert map to slice
+	versionList := make([]Version, 0, len(v))
+	for _, ver := range v {
+		versionList = append(versionList, ver)
+	}
+
+	// sort by UntilHeight in ascending order
+	sort.SliceStable(versionList, func(i, j int) bool {
+		return versionList[i].UntilHeight < versionList[j].UntilHeight
+	})
+
+	return versionList
+}
+
 // GenesisVersion returns the genesis version.
 func (v Versions) GenesisVersion() (Version, error) {
 	var genesis Version
 	var minHeight int64 = -1
 
-	for _, version := range v {
+	for _, version := range v.sorted() {
 		if minHeight == -1 || version.UntilHeight < minHeight {
 			minHeight = version.UntilHeight
 			genesis = version
@@ -42,7 +59,7 @@ func (v Versions) GenesisVersion() (Version, error) {
 // GetForHeight returns the version for a given height.
 func (v Versions) GetForHeight(height int64) (Version, error) {
 	var selectedVersion Version
-	for _, version := range v {
+	for _, version := range v.sorted() {
 		if version.UntilHeight >= height {
 			selectedVersion = version
 			break
@@ -58,7 +75,7 @@ func (v Versions) GetForHeight(height int64) (Version, error) {
 
 // ShouldLatestApp returns true if the given height is higher than all version's UntilHeight.
 func (v Versions) ShouldLatestApp(height int64) bool {
-	for _, version := range v {
+	for _, version := range v.sorted() {
 		if version.UntilHeight >= height {
 			return false
 		}
