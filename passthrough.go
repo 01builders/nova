@@ -34,16 +34,15 @@ Use a version name to specify a named version or a height to execute on the vers
 
 			var (
 				appVersion abci.Version
-				found      bool
 				err        error
 			)
 
 			// Determine which version to use based on flags
 			if versionName != "" && height == 0 {
 				// Get by name
-				appVersion, found = versions[versionName]
-				if !found {
-					return fmt.Errorf("version %s not found", versionName)
+				appVersion, err = versions.GetForName(versionName)
+				if err != nil {
+					return fmt.Errorf("version %s not found: %w", versionName, err)
 				}
 			} else if errParseHeight == nil { // Get by height
 				if versions.ShouldLatestApp(height) {

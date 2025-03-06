@@ -56,6 +56,16 @@ func (v Versions) GenesisVersion() (Version, error) {
 	return genesis, nil
 }
 
+// GetForName returns the version for a given name.
+func (v Versions) GetForName(name string) (Version, error) {
+	for _, version := range v {
+		if version.Name == name {
+			return version, nil
+		}
+	}
+	return Version{}, fmt.Errorf("%w: %s", ErrNoVersionFound, name)
+}
+
 // GetForHeight returns the version for a given height.
 func (v Versions) GetForHeight(height int64) (Version, error) {
 	var selectedVersion Version
