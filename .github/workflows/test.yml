@@ -10,6 +10,8 @@ jobs:
     steps:
       - name: Checkout Nova Repository
         uses: actions/checkout@v4
+        with:
+          lfs: true
 
       - name: Set up Go
         uses: actions/setup-go@v5
