@@ -26,7 +26,7 @@ func NewPassthroughCmd(versions abci.Versions) (*cobra.Command, error) {
 		Long: `Execute a command on a specific app version.
 This allows interacting with older app versions for debugging or older queries.
 Use a version name to specify a named version or a height to execute on the version active at a specific height as first argument.`,
-		Example: `passsthrough v3 status`,
+		Example: `passthrough v3 status`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if len(args) >= 2 && strings.EqualFold("start", args[1]) {
 				return errors.New("cannot passthrough start command")
