@@ -16,9 +16,5 @@ jobs:
         with:
           go-version: "stable"
 
-      - name: Fetch Release
-        # download the celestia release for embedded tests.
-        run: curl -Lo appd/celestia-app_Linux_x86_64.tar.gz https://github.com/celestiaorg/celestia-app/releases/download/v3.3.1/celestia-app_Linux_x86_64.tar.gz
-
       - name: Run Tests
         run: make test-cover
