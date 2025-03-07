@@ -1,4 +1,4 @@
-package appd
+package testdata
 
 import (
 	"fmt"
