@@ -26,11 +26,7 @@ type Appd struct {
 // New takes a binary and untar it in a temporary directory.
 func New(name string, bin []byte, cfg ...CfgOption) (*Appd, error) {
 	if len(bin) == 0 {
-		var err error
-		bin, err = CelestiaApp()
-		if err != nil {
-			return nil, fmt.Errorf("fallback celestia-app failed; failed to get binary data for %s: %w", name, err)
-		}
+		return nil, fmt.Errorf("no binary data available: ensure `bin` is not empty")
 	}
 
 	// untar the binary.
