@@ -1,6 +1,6 @@
 module github.com/01builders/nova
 
-go 1.24.0
+go 1.23.0
 
 require (
 	cosmossdk.io/log v1.5.0
