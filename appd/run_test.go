@@ -2,14 +2,19 @@ package appd
 
 import (
 	"bytes"
-	"github.com/stretchr/testify/require"
 	"os"
 	"testing"
+
+	"github.com/01builders/nova/appd/internal/testdata"
+	"github.com/stretchr/testify/require"
 )
 
 // TestCreateExecCommand execs a command to an embedded binary.
 func TestCreateExecCommand(t *testing.T) {
-	appdInstance, err := New("test-app", nil)
+	bin, err := testdata.CelestiaApp()
+	require.NoError(t, err)
+
+	appdInstance, err := New("test-app", bin)
 	require.NoError(t, err)
 	require.NotNil(t, appdInstance)
 
