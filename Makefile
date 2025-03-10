@@ -5,6 +5,9 @@ GO ?= go
 test:
 	$(GO) test ./... -v
 
+test-short:
+	$(GO) test ./... -v -short
+
 # Run tests with coverage
 test-cover:
 	$(GO) test ./... -cover -v

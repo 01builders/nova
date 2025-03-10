@@ -11,6 +11,10 @@ import (
 
 // TestCreateExecCommand execs a command to an embedded binary.
 func TestCreateExecCommand(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping test which expects an embedded binary")
+	}
+
 	bin, err := testdata.CelestiaApp()
 	require.NoError(t, err)
 
