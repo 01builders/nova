@@ -3,8 +3,9 @@ package abci
 import (
 	"errors"
 	"fmt"
-	"github.com/01builders/nova/appd"
 	"sort"
+
+	"github.com/01builders/nova/appd"
 )
 
 // ErrNoVersionFound is returned when no remote version is found for a given height.

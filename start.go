@@ -89,6 +89,7 @@ func start(versions abci.Versions, svrCtx *server.Context, clientCtx client.Cont
 		if err != nil {
 			return err
 		}
+
 		defer appCleanupFn()
 	}
 
@@ -99,7 +100,7 @@ func start(versions abci.Versions, svrCtx *server.Context, clientCtx client.Cont
 
 	emitServerInfoMetrics()
 
-	return startInProcess(versions, height, svrCtx, svrCfg, clientCtx, app, metrics)
+	return startInProcess(versions, height, svrCtx, svrCfg, clientCtx, app, metrics, usesLatestApp)
 }
 
 func getCurrentHeight(rootDir string, v *viper.Viper) (int64, error) {
@@ -119,6 +120,7 @@ func startInProcess(
 	clientCtx client.Context,
 	app types.Application,
 	metrics *telemetry.Metrics,
+	isLatestApp bool,
 ) error {
 	cmtCfg := svrCtx.Config
 	gRPCOnly := svrCtx.Viper.GetBool(flagGRPCOnly)
@@ -135,6 +137,10 @@ func startInProcess(
 			return err
 		}
 		defer cleanupFn()
+
+		if !isLatestApp { // latestApp isn't used, use servers from remote app
+			return g.Wait()
+		}
 
 		// Add the tx service to the gRPC router. We only need to register this
 		// service if API or gRPC is enabled, and avoid doing so in the general

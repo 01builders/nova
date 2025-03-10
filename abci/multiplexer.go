@@ -70,10 +70,10 @@ func NewMultiplexer(
 	}
 
 	// prepare remote app client
-	const flagGRPCAddress = "grpc.address"
+	const flagGRPCAddress = "address"
 	grpcAddress := v.GetString(flagGRPCAddress)
 	if grpcAddress == "" {
-		grpcAddress = "localhost:9090"
+		grpcAddress = "localhost:26658"
 	}
 
 	conn, err := grpc.NewClient(
@@ -86,6 +86,10 @@ func NewMultiplexer(
 	wrapper.conn = conn
 
 	// start the correct version
+	if currentVersion.Appd == nil {
+		return nil, fmt.Errorf("appd is nil for height %d", currentHeight)
+	}
+
 	if currentVersion.Appd.Pid() == appd.AppdStopped {
 		programArgs := os.Args
 		if len(os.Args) > 2 {
