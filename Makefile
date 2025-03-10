@@ -16,4 +16,4 @@ test-cover:
 lint-fix:
 	golangci-lint run --fix
 
-.PHONY: test test-cover lint-fix
+.PHONY: test test-cover test-short lint-fix
