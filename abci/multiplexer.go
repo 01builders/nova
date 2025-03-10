@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 	"sync"
 
 	"github.com/spf13/viper"
@@ -70,14 +71,17 @@ func NewMultiplexer(
 	}
 
 	// prepare remote app client
-	const flagGRPCAddress = "address"
-	grpcAddress := v.GetString(flagGRPCAddress)
-	if grpcAddress == "" {
-		grpcAddress = "localhost:26658"
+	const flagTMAddress = "address"
+	tmAddress := v.GetString(flagTMAddress)
+	if tmAddress == "" {
+		tmAddress = "localhost:26658"
 	}
 
+	// remove tcp:// prefix if present
+	tmAddress = strings.TrimPrefix(tmAddress, "tcp://")
+
 	conn, err := grpc.NewClient(
-		grpcAddress,
+		tmAddress,
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
 	)
 	if err != nil {
