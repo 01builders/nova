@@ -3,8 +3,9 @@ package abci
 import (
 	"errors"
 	"fmt"
-	"github.com/01builders/nova/appd"
 	"sort"
+
+	"github.com/01builders/nova/appd"
 )
 
 // ErrNoVersionFound is returned when no remote version is found for a given height.
@@ -102,7 +103,7 @@ func (v Version) GetStartArgs(args []string) []string {
 	// Default flags for standalone apps.
 	return append(args,
 		"--grpc.enable=true",
-		"--api.enable=false",
+		"--api.enable=true",
 		"--api.swagger=false",
 		"--with-tendermint=false",
 		"--transport=grpc",
