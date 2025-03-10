@@ -5,6 +5,9 @@ GO ?= go
 test:
 	$(GO) test ./... -v
 
+test-short:
+	$(GO) test ./... -v -short
+
 # Run tests with coverage
 test-cover:
 	$(GO) test ./... -cover -v
@@ -13,4 +16,4 @@ test-cover:
 lint-fix:
 	golangci-lint run --fix
 
-.PHONY: test test-cover lint-fix
+.PHONY: test test-cover test-short lint-fix
