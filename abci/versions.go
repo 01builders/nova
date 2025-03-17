@@ -106,7 +106,7 @@ func (v Version) GetStartArgs(args []string) []string {
 		"--api.enable=true",
 		"--api.swagger=false",
 		"--with-tendermint=false",
-		"--transport=socket",
+		"--transport=grpc",
 	)
 }
 
