@@ -107,7 +107,7 @@ func NewMultiplexer(
 	// remove tcp:// prefix if present
 	tmAddress = strings.TrimPrefix(tmAddress, "tcp://")
 
-	conn, err := grpc.NewClient(
+	conn, err := grpc.Dial( //nolint:staticcheck: we want to check the connection.
 		tmAddress,
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
 	)
@@ -258,11 +258,6 @@ func (m *Multiplexer) Info(_ context.Context, req *abci.RequestInfo) (*abci.Resp
 	app, err := m.getAppForHeight(m.lastHeight)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get app for height %d: %w", m.lastHeight, err)
-	}
-
-	// Add debug info about available services
-	if m.conn != nil {
-		fmt.Println("WENT HERE", req)
 	}
 
 	return app.Info(req)

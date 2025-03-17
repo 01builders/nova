@@ -103,28 +103,6 @@ func start(versions abci.Versions, svrCtx *server.Context, clientCtx client.Cont
 
 	emitServerInfoMetrics()
 
-	return startInProcess(versions, height, svrCtx, svrCfg, clientCtx, app, metrics, usesLatestApp)
-}
-
-func getCurrentHeight(rootDir string, v *viper.Viper) (int64, error) {
-	db, err := openDB(rootDir, server.GetAppDBBackend(v))
-	if err != nil {
-		return 0, err
-	}
-
-	return rootmulti.GetLatestVersion(db), db.Close()
-}
-
-func startInProcess(
-	versions abci.Versions,
-	currentHeight int64,
-	svrCtx *server.Context,
-	svrCfg serverconfig.Config,
-	clientCtx client.Context,
-	app types.Application,
-	metrics *telemetry.Metrics,
-	isLatestApp bool,
-) error {
 	cmtCfg := svrCtx.Config
 	gRPCOnly := svrCtx.Viper.GetBool(flagGRPCOnly)
 
@@ -134,20 +112,20 @@ func startInProcess(
 		svrCtx.Logger.Info("starting node in gRPC only mode; CometBFT is disabled")
 		svrCfg.GRPC.Enable = true
 	} else {
-		if !isLatestApp {
+		if !usesLatestApp {
 			svrCtx.Logger.Info("starting node with multiplexer")
 		} else {
 			svrCtx.Logger.Info("starting node with latest app")
 		}
 		tmNode, cleanupFn, err := startCmtNode(
-			versions, currentHeight, ctx, cmtCfg, app, svrCtx, isLatestApp,
+			versions, height, ctx, cmtCfg, app, svrCtx, usesLatestApp,
 		)
 		if err != nil {
 			return err
 		}
 		defer cleanupFn()
 
-		if !isLatestApp { // latestApp isn't used, use servers from remote app
+		if !usesLatestApp { // latestApp isn't used, use servers from remote app
 			return g.Wait()
 		}
 
@@ -170,14 +148,22 @@ func startInProcess(
 		return err
 	}
 
-	err = startAPIServer(ctx, g, svrCfg, clientCtx, svrCtx, app, cmtCfg.RootDir, grpcSrv, metrics)
-	if err != nil {
+	if err = startAPIServer(ctx, g, svrCfg, clientCtx, svrCtx, app, cmtCfg.RootDir, grpcSrv, metrics); err != nil {
 		return err
 	}
 
 	// wait for signal capture and gracefully return
 	// we are guaranteed to be waiting for the "ListenForQuitSignals" goroutine.
 	return g.Wait()
+}
+
+func getCurrentHeight(rootDir string, v *viper.Viper) (int64, error) {
+	db, err := openDB(rootDir, server.GetAppDBBackend(v))
+	if err != nil {
+		return 0, err
+	}
+
+	return rootmulti.GetLatestVersion(db), db.Close()
 }
 
 func startCmtNode(
