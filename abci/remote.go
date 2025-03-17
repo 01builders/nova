@@ -13,7 +13,7 @@ type RemoteABCIClient struct {
 }
 
 // NewRemoteABCIClient returns a new ABCI Client.
-// This gRPC client connects to cometbft via grpc.
+// The client behaves like CometBFT for the server side (the application side).
 func NewRemoteABCIClient(conn *grpc.ClientConn) *RemoteABCIClient {
 	return &RemoteABCIClient{ABCIClient: abci.NewABCIClient(conn)}
 }

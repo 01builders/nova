@@ -14,6 +14,7 @@ import (
 
 	"cosmossdk.io/log"
 	abci "github.com/cometbft/cometbft/abci/types"
+	"github.com/cometbft/cometbft/proxy"
 	servertypes "github.com/cosmos/cosmos-sdk/server/types"
 
 	"github.com/01builders/nova/appd"
@@ -40,10 +41,13 @@ func NewMultiplexer(
 	latestApp servertypes.ABCI,
 	versions Versions,
 	currentHeight int64,
-) (abci.Application, error) {
+) (proxy.ClientCreator, func() error, error) {
+	var noOpCleanUp = func() error {
+		return nil
+	}
 
 	if err := versions.Validate(); err != nil {
-		return nil, fmt.Errorf("invalid versions: %w", err)
+		return nil, noOpCleanUp, fmt.Errorf("invalid versions: %w", err)
 	}
 
 	wrapper := &Multiplexer{
@@ -65,16 +69,39 @@ func NewMultiplexer(
 		currentVersion, err = versions.GetForHeight(currentHeight)
 	}
 	if err != nil && errors.Is(err, ErrNoVersionFound) {
-		return wrapper, nil // no version found, assume latest
+		return proxy.NewLocalClientCreator(wrapper), noOpCleanUp, nil // no version found, assume latest
 	} else if err != nil {
-		return nil, fmt.Errorf("failed to get app for height %d: %w", currentHeight, err)
+		return nil, noOpCleanUp, fmt.Errorf("failed to get app for height %d: %w", currentHeight, err)
+	}
+
+	// start the correct version
+	if currentVersion.Appd == nil {
+		return nil, noOpCleanUp, fmt.Errorf("appd is nil for height %d", currentHeight)
+	}
+
+	if currentVersion.Appd.Pid() == appd.AppdStopped {
+		programArgs := os.Args
+		if len(os.Args) > 2 {
+			programArgs = os.Args[2:] // remove 'appd start' args
+		}
+
+		if err := currentVersion.Appd.Start(currentVersion.GetStartArgs(programArgs)...); err != nil {
+			return nil, noOpCleanUp, fmt.Errorf("failed to start app: %w", err)
+		}
+
+		if currentVersion.Appd.Pid() == appd.AppdStopped { // should never happen
+			return nil, noOpCleanUp, fmt.Errorf("app failed to start")
+		}
+
+		wrapper.started = true
+		wrapper.activeVersion = currentVersion
 	}
 
 	// prepare remote app client
 	const flagTMAddress = "address"
 	tmAddress := v.GetString(flagTMAddress)
 	if tmAddress == "" {
-		tmAddress = "localhost:26658"
+		tmAddress = "127.0.0.1:26658"
 	}
 
 	// remove tcp:// prefix if present
@@ -85,34 +112,11 @@ func NewMultiplexer(
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
 	)
 	if err != nil {
-		return nil, fmt.Errorf("failed to prepare app connection: %w", err)
+		return nil, noOpCleanUp, fmt.Errorf("failed to prepare app connection: %w", err)
 	}
 	wrapper.conn = conn
 
-	// start the correct version
-	if currentVersion.Appd == nil {
-		return nil, fmt.Errorf("appd is nil for height %d", currentHeight)
-	}
-
-	if currentVersion.Appd.Pid() == appd.AppdStopped {
-		programArgs := os.Args
-		if len(os.Args) > 2 {
-			programArgs = os.Args[2:] // remove 'appd start' args
-		}
-
-		if err := currentVersion.Appd.Start(currentVersion.GetStartArgs(programArgs)...); err != nil {
-			return nil, fmt.Errorf("failed to start app: %w", err)
-		}
-
-		if currentVersion.Appd.Pid() == appd.AppdStopped { // should never happen
-			return nil, fmt.Errorf("app failed to start")
-		}
-
-		wrapper.started = true
-		wrapper.activeVersion = currentVersion
-	}
-
-	return wrapper, nil
+	return proxy.NewConnSyncLocalClientCreator(wrapper), wrapper.Cleanup, nil
 }
 
 // getAppForHeight gets the appropriate app based on height
@@ -122,7 +126,7 @@ func (m *Multiplexer) getAppForHeight(height int64) (servertypes.ABCI, error) {
 
 	// use the latest app if the height is beyond all defined versions
 	if m.versions.ShouldLatestApp(height) {
-		// TODO: maybe start the latest app here if not already started
+		// TODO: start the latest app here if not already started
 		return m.latestApp, nil
 	}
 
@@ -254,6 +258,11 @@ func (m *Multiplexer) Info(_ context.Context, req *abci.RequestInfo) (*abci.Resp
 	app, err := m.getAppForHeight(m.lastHeight)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get app for height %d: %w", m.lastHeight, err)
+	}
+
+	// Add debug info about available services
+	if m.conn != nil {
+		fmt.Println("WENT HERE", req)
 	}
 
 	return app.Info(req)
