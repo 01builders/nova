@@ -40,8 +40,8 @@ func NewMultiplexer(
 	v *viper.Viper,
 	latestApp servertypes.ABCI,
 	versions Versions,
-	applicationVersion string,
 	currentHeight int64,
+	applicationVersion string,
 ) (proxy.ClientCreator, func() error, error) {
 	var noOpCleanUp = func() error {
 		return nil

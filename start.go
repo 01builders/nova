@@ -118,8 +118,19 @@ func start(versions abci.Versions, svrCtx *server.Context, clientCtx client.Cont
 		} else {
 			svrCtx.Logger.Info("starting node with latest app")
 		}
+
+		var appVersion string
+		if !usesLatestApp {
+			// if we are not using the latest version, we need to fetch the version
+			// from the latest version of the app.
+			appVersion, err = getAppVersion(svrCtx, appCreator)
+			if err != nil {
+				return err
+			}
+		}
+
 		tmNode, cleanupFn, err := startCmtNode(
-			versions, height, ctx, cmtCfg, app, svrCtx, usesLatestApp,
+			versions, height, ctx, cmtCfg, app, svrCtx, usesLatestApp, appVersion,
 		)
 		if err != nil {
 			return err
@@ -175,14 +186,9 @@ func startCmtNode(
 	app types.Application,
 	svrCtx *server.Context,
 	isLatestApp bool,
+	appVersion string,
 ) (tmNode *node.Node, cleanupFn func(), err error) {
 	nodeKey, err := p2p.LoadOrGenNodeKey(cfg.NodeKeyFile())
-	if err != nil {
-		return nil, cleanupFn, err
-	}
-
-	// Query the version from app.Info and log it
-	resp, err := app.Info(&cmabci.RequestInfo{})
 	if err != nil {
 		return nil, cleanupFn, err
 	}
@@ -192,9 +198,10 @@ func startCmtNode(
 		svrCtx.Viper,
 		app,
 		versions,
-		resp.Version,
 		currentHeight,
+		appVersion,
 	)
+
 	if err != nil {
 		return nil, cleanupFn, err
 	}
@@ -418,6 +425,22 @@ func getCtx(svrCtx *server.Context, block bool) (*errgroup.Group, context.Contex
 	return g, ctx
 }
 
+// getAppVersion returns the application version to be used.
+func getAppVersion(svrCtx *server.Context, appCreator types.AppCreator) (string, error) {
+	app, cleanupFn, err := startApp(svrCtx, appCreator)
+	if err != nil {
+		return "", err
+	}
+	defer cleanupFn() // we only wanted to start the app to fetch the app version. Clean it up immediately.
+
+	resp, err := app.Info(&cmabci.RequestInfo{})
+	if err != nil {
+		return "", err
+	}
+
+	return resp.Version, nil
+}
+
 func startApp(svrCtx *server.Context, appCreator types.AppCreator) (app types.Application, cleanupFn func(), err error) {
 	traceWriter, traceCleanupFn, err := setupTraceWriter(svrCtx)
 	if err != nil {
@@ -437,6 +460,7 @@ func startApp(svrCtx *server.Context, appCreator types.AppCreator) (app types.Ap
 			svrCtx.Logger.Error(localErr.Error())
 		}
 	}
+
 	return app, cleanupFn, nil
 }
 
