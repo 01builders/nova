@@ -17,6 +17,10 @@ import (
 
 type RemoteABCIClientV1 struct {
 	abciv1.ABCIApplicationClient
+
+	// retainLastHeight is the height is set in finalize block
+	// and returned in commit
+	retainLastHeight int64
 }
 
 // NewRemoteABCIClientV1 returns a new ABCI Client (using ABCI v1).
@@ -73,24 +77,28 @@ func (a *RemoteABCIClientV1) CheckTx(req *abciv2.RequestCheckTx) (*abciv2.Respon
 
 // Commit implements abciv2.ABCI
 func (a *RemoteABCIClientV1) Commit() (*abciv2.ResponseCommit, error) {
-	resp, err := a.ABCIApplicationClient.Commit(context.Background(), &abciv1.RequestCommit{}, grpc.WaitForReady(true))
-	if err != nil {
-		return nil, err
-	}
-
 	return &abciv2.ResponseCommit{
-		// Data:         resp.Data, // TODO: there no data here.
-		RetainHeight: resp.RetainHeight,
+		RetainHeight: a.retainLastHeight,
 	}, nil
 }
 
 // FinalizeBlock implements abciv2.ABCI
 func (a *RemoteABCIClientV1) FinalizeBlock(req *abciv2.RequestFinalizeBlock) (*abciv2.ResponseFinalizeBlock, error) {
 	beginBlockResp, err := a.ABCIApplicationClient.BeginBlock(context.Background(), &abciv1.RequestBeginBlock{
-		Hash:                req.Hash,
-		Header:              typesv1.Header{},
-		LastCommitInfo:      abciv1.LastCommitInfo{},
-		ByzantineValidators: []abciv1.Evidence{},
+		Hash: req.Hash,
+		Header: typesv1.Header{
+			Version: versionv1.Consensus{
+				Block: 0, // TODO: hardcoded as not available in v0.38 fork
+				App:   0, // TODO: hardcoded as not available in v0.38 fork
+			},
+			ChainID:            "", // TODO: hardcoded as not available in v0.38 fork
+			Height:             req.Height,
+			Time:               req.Time,
+			NextValidatorsHash: req.NextValidatorsHash,
+			ProposerAddress:    req.ProposerAddress,
+		},
+		LastCommitInfo:      commitInfoV1ToV2(&req.DecidedLastCommit),
+		ByzantineValidators: []abciv1.Evidence{}, // TODO: use misbehavior
 	}, grpc.WaitForReady(true))
 	if err != nil {
 		return nil, err
@@ -142,12 +150,21 @@ func (a *RemoteABCIClientV1) FinalizeBlock(req *abciv2.RequestFinalizeBlock) (*a
 		})
 	}
 
+	// commit result
+	commitResp, err := a.ABCIApplicationClient.Commit(context.Background(), &abciv1.RequestCommit{}, grpc.WaitForReady(true))
+	if err != nil {
+		return nil, err
+	}
+
+	// set the retain height, used in commit noop
+	a.retainLastHeight = commitResp.RetainHeight
+
 	return &abciv2.ResponseFinalizeBlock{
 		Events:                events,
 		TxResults:             txResults,
 		ValidatorUpdates:      validatorUpdatesV1ToV2(endBlockResp.ValidatorUpdates),
 		ConsensusParamUpdates: consensusParamsV1ToV2(endBlockResp.ConsensusParamUpdates),
-		AppHash:               nil, // TODO: we have the app hash at commit I think, not here on v1.
+		AppHash:               commitResp.Data,
 	}, nil
 }
 
@@ -505,4 +522,21 @@ func consensusParamsV2ToV1(params *typesv2.ConsensusParams) *abciv1.ConsensusPar
 		}
 	}
 	return consensusParamsV1
+}
+
+func commitInfoV1ToV2(info *abciv2.CommitInfo) abciv1.LastCommitInfo {
+	votes := make([]abciv1.VoteInfo, 0, len(info.Votes))
+	for _, vote := range info.Votes {
+		votes = append(votes, abciv1.VoteInfo{
+			Validator: abciv1.Validator{
+				Address: vote.Validator.Address,
+				Power:   vote.Validator.Power,
+			},
+			SignedLastBlock: vote.BlockIdFlag == typesv2.BlockIDFlagCommit,
+		})
+	}
+	return abciv1.LastCommitInfo{
+		Round: info.Round,
+		Votes: votes,
+	}
 }
