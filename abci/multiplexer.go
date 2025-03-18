@@ -181,7 +181,14 @@ func (m *Multiplexer) getAppForHeight(height int64) (servertypes.ABCI, error) {
 		}
 	}
 
-	return NewRemoteABCIClient(m.conn), nil
+	switch currentVersion.ABCIClientVersion {
+	case ABCIClientVersion1:
+		return NewRemoteABCIClientV1(m.conn), nil
+	case ABCIClientVersion2:
+		return NewRemoteABCIClientV2(m.conn), nil
+	}
+
+	return nil, fmt.Errorf("unknown ABCI client version %d", currentVersion.ABCIClientVersion)
 }
 
 // Cleanup allows proper multiplexer termination.
