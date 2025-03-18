@@ -147,8 +147,8 @@ func (a *RemoteABCIClientV1) FinalizeBlock(req *abciv2.RequestFinalizeBlock) (*a
 		Events:                events,
 		TxResults:             txResults,
 		ValidatorUpdates:      validatorUpdatesV1ToV2(endBlockResp.ValidatorUpdates),
-		ConsensusParamUpdates: nil,
-		AppHash:               nil,
+		ConsensusParamUpdates: consensusParamsV1ToV2(endBlockResp.ConsensusParamUpdates),
+		AppHash:               nil, // TODO: we have the app hash at commit I think, not here on v1.
 	}, nil
 }
 
@@ -174,24 +174,10 @@ func (a *RemoteABCIClientV1) Info(req *abciv2.RequestInfo) (*abciv2.ResponseInfo
 
 // InitChain implements abciv2.ABCI
 func (a *RemoteABCIClientV1) InitChain(req *abciv2.RequestInitChain) (*abciv2.ResponseInitChain, error) {
-	consensusParamsV1 := &abciv1.ConsensusParams{ // TODO nil checks
-		Block: &abciv1.BlockParams{
-			MaxBytes: req.ConsensusParams.Block.MaxBytes,
-			MaxGas:   req.ConsensusParams.Block.MaxGas,
-		},
-		Evidence: &typesv1.EvidenceParams{
-			MaxAgeNumBlocks: req.ConsensusParams.Evidence.MaxAgeNumBlocks,
-			MaxAgeDuration:  req.ConsensusParams.Evidence.MaxAgeDuration,
-		},
-		Version: &typesv1.VersionParams{
-			AppVersion: req.ConsensusParams.Version.App,
-		},
-	}
-
 	resp, err := a.ABCIApplicationClient.InitChain(context.Background(), &abciv1.RequestInitChain{
 		Time:            req.Time,
 		ChainId:         req.ChainId,
-		ConsensusParams: consensusParamsV1,
+		ConsensusParams: consensusParamsV2ToV1(req.ConsensusParams),
 		Validators:      validatorUpdatesV2ToV1(req.Validators),
 		AppStateBytes:   req.AppStateBytes,
 		InitialHeight:   req.InitialHeight,
@@ -200,22 +186,8 @@ func (a *RemoteABCIClientV1) InitChain(req *abciv2.RequestInitChain) (*abciv2.Re
 		return nil, err
 	}
 
-	consensusParamsV2 := &typesv2.ConsensusParams{
-		Block: &typesv2.BlockParams{
-			MaxBytes: resp.ConsensusParams.Block.MaxBytes,
-			MaxGas:   resp.ConsensusParams.Block.MaxGas,
-		},
-		Evidence: &typesv2.EvidenceParams{
-			MaxAgeNumBlocks: resp.ConsensusParams.Evidence.MaxAgeNumBlocks,
-			MaxAgeDuration:  resp.ConsensusParams.Evidence.MaxAgeDuration,
-		},
-		Version: &typesv2.VersionParams{
-			App: resp.ConsensusParams.Version.AppVersion,
-		},
-	}
-
 	return &abciv2.ResponseInitChain{
-		ConsensusParams: consensusParamsV2,
+		ConsensusParams: consensusParamsV1ToV2(resp.ConsensusParams),
 		Validators:      validatorUpdatesV1ToV2(resp.Validators),
 		AppHash:         resp.AppHash,
 	}, nil
@@ -471,4 +443,65 @@ func validatorUpdatesV2ToV1(validators []abciv2.ValidatorUpdate) []abciv1.Valida
 	}
 
 	return v1Updates
+}
+
+func consensusParamsV1ToV2(params *abciv1.ConsensusParams) *typesv2.ConsensusParams {
+	consensusParamsV2 := &typesv2.ConsensusParams{}
+	if blockParams := params.GetBlock(); blockParams != nil {
+		consensusParamsV2.Block = &typesv2.BlockParams{
+			MaxBytes: blockParams.MaxBytes,
+			MaxGas:   blockParams.MaxGas,
+		}
+	}
+
+	if evidenceParams := params.GetEvidence(); evidenceParams != nil {
+		consensusParamsV2.Evidence = &typesv2.EvidenceParams{
+			MaxAgeNumBlocks: evidenceParams.MaxAgeNumBlocks,
+			MaxAgeDuration:  evidenceParams.MaxAgeDuration,
+		}
+	}
+
+	if versionParams := params.GetVersion(); versionParams != nil {
+		consensusParamsV2.Version = &typesv2.VersionParams{
+			App: versionParams.AppVersion,
+		}
+	}
+
+	if validatorParams := params.GetValidator(); validatorParams != nil {
+		consensusParamsV2.Validator = &typesv2.ValidatorParams{
+			PubKeyTypes: validatorParams.PubKeyTypes,
+		}
+	}
+
+	return consensusParamsV2
+}
+
+func consensusParamsV2ToV1(params *typesv2.ConsensusParams) *abciv1.ConsensusParams {
+	consensusParamsV1 := &abciv1.ConsensusParams{}
+	if blockParams := params.GetBlock(); blockParams != nil {
+		consensusParamsV1.Block = &abciv1.BlockParams{
+			MaxBytes: blockParams.MaxBytes,
+			MaxGas:   blockParams.MaxGas,
+		}
+	}
+
+	if evidenceParams := params.GetEvidence(); evidenceParams != nil {
+		consensusParamsV1.Evidence = &typesv1.EvidenceParams{
+			MaxAgeNumBlocks: evidenceParams.MaxAgeNumBlocks,
+			MaxAgeDuration:  evidenceParams.MaxAgeDuration,
+		}
+	}
+
+	if versionParams := params.GetVersion(); versionParams != nil {
+		consensusParamsV1.Version = &typesv1.VersionParams{
+			AppVersion: versionParams.App,
+		}
+	}
+
+	if validatorParams := params.GetValidator(); validatorParams != nil {
+		consensusParamsV1.Validator = &typesv1.ValidatorParams{
+			PubKeyTypes: validatorParams.PubKeyTypes,
+		}
+	}
+	return consensusParamsV1
 }
