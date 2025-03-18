@@ -91,7 +91,6 @@ func (a *RemoteABCIClientV1) FinalizeBlock(req *abciv2.RequestFinalizeBlock) (*a
 				Block: 0, // TODO: hardcoded as not available in v0.38 fork
 				App:   3, // TODO: hardcoded as not available in v0.38 fork
 			},
-			ChainID:            "", // TODO: hardcoded as not available in v0.38 fork
 			Height:             req.Height,
 			Time:               req.Time,
 			NextValidatorsHash: req.NextValidatorsHash,
@@ -268,7 +267,7 @@ func (a *RemoteABCIClientV1) OfferSnapshot(req *abciv2.RequestOfferSnapshot) (*a
 				Metadata: req.Snapshot.Metadata,
 			},
 			AppHash:    req.AppHash,
-			AppVersion: 3, // TODO: hardcoded as not available in v0.38 fork
+			AppVersion: req.AppVersion,
 		},
 		grpc.WaitForReady(true),
 	)
@@ -288,7 +287,6 @@ func (a *RemoteABCIClientV1) PrepareProposal(req *abciv2.RequestPrepareProposal)
 			Txs: req.Txs,
 		},
 		BlockDataSize: math.MaxInt32, // TODO: hardcoded as not available in v0.38 fork
-		ChainId:       "",            // TODO: hardcoded as not available in v0.38 fork
 		Height:        req.Height,
 		Time:          req.Time,
 	},
@@ -312,7 +310,6 @@ func (a *RemoteABCIClientV1) ProcessProposal(req *abciv2.RequestProcessProposal)
 				Block: 0, // TODO: hardcoded as not available in v0.38 fork
 				App:   3, // TODO: hardcoded as not available in v0.38 fork
 			},
-			ChainID:            "", // TODO: hardcoded as not available in v0.38 fork
 			Height:             req.Height,
 			Time:               req.Time,
 			NextValidatorsHash: req.NextValidatorsHash,

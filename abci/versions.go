@@ -13,12 +13,12 @@ var ErrNoVersionFound = errors.New("no version found")
 
 // Version defines the configuration for remote apps.
 type Version struct {
-	Name              string
-	ABCIClientVersion ABCIClientVersion
-	Appd              *appd.Appd
-	UntilHeight       int64
-	PreHandler        string   // Command to run before starting the app
-	StartArgs         []string // Extra arguments to pass to the app
+	Name        string
+	ABCIVersion ABCIClientVersion
+	Appd        *appd.Appd
+	UntilHeight int64
+	PreHandler  string   // Command to run before starting the app
+	StartArgs   []string // Extra arguments to pass to the app
 }
 
 type Versions []Version
