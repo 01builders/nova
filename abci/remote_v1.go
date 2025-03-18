@@ -300,6 +300,7 @@ func (a *RemoteABCIClientV1) ProcessProposal(req *abciv2.RequestProcessProposal)
 			Time:               req.Time,
 			NextValidatorsHash: req.NextValidatorsHash,
 			ProposerAddress:    req.ProposerAddress,
+			DataHash:           req.DataRootHash,
 		},
 		BlockData: &typesv1.Data{
 			Txs:        req.Txs,
