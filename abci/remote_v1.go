@@ -89,7 +89,7 @@ func (a *RemoteABCIClientV1) FinalizeBlock(req *abciv2.RequestFinalizeBlock) (*a
 		Header: typesv1.Header{
 			Version: versionv1.Consensus{
 				Block: 0, // TODO: hardcoded as not available in v0.38 fork
-				App:   0, // TODO: hardcoded as not available in v0.38 fork
+				App:   3, // TODO: hardcoded as not available in v0.38 fork
 			},
 			ChainID:            "", // TODO: hardcoded as not available in v0.38 fork
 			Height:             req.Height,
@@ -310,7 +310,7 @@ func (a *RemoteABCIClientV1) ProcessProposal(req *abciv2.RequestProcessProposal)
 		Header: typesv1.Header{
 			Version: versionv1.Consensus{
 				Block: 0, // TODO: hardcoded as not available in v0.38 fork
-				App:   0, // TODO: hardcoded as not available in v0.38 fork
+				App:   3, // TODO: hardcoded as not available in v0.38 fork
 			},
 			ChainID:            "", // TODO: hardcoded as not available in v0.38 fork
 			Height:             req.Height,
