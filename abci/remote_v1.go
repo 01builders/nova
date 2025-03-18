@@ -97,8 +97,8 @@ func (a *RemoteABCIClientV1) FinalizeBlock(req *abciv2.RequestFinalizeBlock) (*a
 			NextValidatorsHash: req.NextValidatorsHash,
 			ProposerAddress:    req.ProposerAddress,
 		},
-		LastCommitInfo:      commitInfoV1ToV2(&req.DecidedLastCommit),
-		ByzantineValidators: []abciv1.Evidence{}, // TODO: use misbehavior
+		LastCommitInfo:      commitInfoV2ToV1(&req.DecidedLastCommit),
+		ByzantineValidators: evidenceV2ToV1(req.Misbehavior),
 	}, grpc.WaitForReady(true))
 	if err != nil {
 		return nil, err
@@ -524,7 +524,7 @@ func consensusParamsV2ToV1(params *typesv2.ConsensusParams) *abciv1.ConsensusPar
 	return consensusParamsV1
 }
 
-func commitInfoV1ToV2(info *abciv2.CommitInfo) abciv1.LastCommitInfo {
+func commitInfoV2ToV1(info *abciv2.CommitInfo) abciv1.LastCommitInfo {
 	votes := make([]abciv1.VoteInfo, 0, len(info.Votes))
 	for _, vote := range info.Votes {
 		votes = append(votes, abciv1.VoteInfo{
@@ -539,4 +539,22 @@ func commitInfoV1ToV2(info *abciv2.CommitInfo) abciv1.LastCommitInfo {
 		Round: info.Round,
 		Votes: votes,
 	}
+}
+
+func evidenceV2ToV1(evidence []abciv2.Misbehavior) []abciv1.Evidence {
+	v1Evidence := make([]abciv1.Evidence, len(evidence))
+	for i, ev := range evidence {
+		v1Evidence[i] = abciv1.Evidence{
+			Type:   abciv1.EvidenceType(ev.Type),
+			Height: ev.Height,
+			Validator: abciv1.Validator{
+				Address: ev.Validator.Address,
+				Power:   ev.Validator.Power,
+			},
+			Time:             ev.Time,
+			TotalVotingPower: ev.TotalVotingPower,
+		}
+	}
+
+	return v1Evidence
 }
