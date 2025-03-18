@@ -24,8 +24,9 @@ type Multiplexer struct {
 	logger log.Logger
 	mu     sync.Mutex
 
-	lastHeight int64
-	started    bool
+	lastHeight         int64
+	applicationVersion string
+	started            bool
 
 	latestApp     servertypes.ABCI
 	activeVersion Version
@@ -52,10 +53,11 @@ func NewMultiplexer(
 	}
 
 	wrapper := &Multiplexer{
-		logger:     logger,
-		latestApp:  latestApp,
-		versions:   versions.Sorted(),
-		lastHeight: currentHeight,
+		logger:             logger,
+		latestApp:          latestApp,
+		versions:           versions.Sorted(),
+		lastHeight:         currentHeight,
+		applicationVersion: applicationVersion,
 	}
 
 	var (
@@ -131,7 +133,12 @@ func (m *Multiplexer) getAppForHeight(height int64) (servertypes.ABCI, error) {
 	// get the appropriate version for this height
 	currentVersion, err := m.versions.GetForHeight(height)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get app for height %d: %w", height, err)
+		// there is no height specified with this version, use the application version set
+		// when constructing the multi plexer.
+		currentVersion, err = m.versions.GetForName(m.applicationVersion)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get app for height %d: %w", height, err)
+		}
 	}
 
 	// check if we need to start the app or if we have a different app running
