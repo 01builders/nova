@@ -119,7 +119,7 @@ func start(versions abci.Versions, svrCtx *server.Context, clientCtx client.Cont
 			svrCtx.Logger.Info("starting node with latest app")
 		}
 
-		var appVersion string
+		var appVersion uint64
 		if !usesLatestApp {
 			// if we are not using the latest version, we need to fetch the version
 			// from the latest version of the app.
@@ -186,7 +186,7 @@ func startCmtNode(
 	app types.Application,
 	svrCtx *server.Context,
 	isLatestApp bool,
-	appVersion string,
+	appVersion uint64,
 ) (tmNode *node.Node, cleanupFn func(), err error) {
 	nodeKey, err := p2p.LoadOrGenNodeKey(cfg.NodeKeyFile())
 	if err != nil {
@@ -426,19 +426,19 @@ func getCtx(svrCtx *server.Context, block bool) (*errgroup.Group, context.Contex
 }
 
 // getAppVersion returns the application version to be used.
-func getAppVersion(svrCtx *server.Context, appCreator types.AppCreator) (string, error) {
+func getAppVersion(svrCtx *server.Context, appCreator types.AppCreator) (uint64, error) {
 	app, cleanupFn, err := startApp(svrCtx, appCreator)
 	if err != nil {
-		return "", err
+		return 0, err
 	}
 	defer cleanupFn() // we only wanted to start the app to fetch the app version. Clean it up immediately.
 
 	resp, err := app.Info(&cmabci.RequestInfo{})
 	if err != nil {
-		return "", err
+		return 0, err
 	}
 
-	return resp.Version, nil
+	return resp.AppVersion, nil
 }
 
 func startApp(svrCtx *server.Context, appCreator types.AppCreator) (app types.Application, cleanupFn func(), err error) {

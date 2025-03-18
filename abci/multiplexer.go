@@ -25,7 +25,7 @@ type Multiplexer struct {
 	mu     sync.Mutex
 
 	lastHeight         int64
-	applicationVersion string
+	applicationVersion uint64
 	started            bool
 
 	latestApp     servertypes.ABCI
@@ -42,7 +42,7 @@ func NewMultiplexer(
 	latestApp servertypes.ABCI,
 	versions Versions,
 	currentHeight int64,
-	applicationVersion string,
+	applicationVersion uint64,
 ) (proxy.ClientCreator, func() error, error) {
 	var noOpCleanUp = func() error {
 		return nil
@@ -135,7 +135,7 @@ func (m *Multiplexer) getAppForHeight(height int64) (servertypes.ABCI, error) {
 	if err != nil {
 		// there is no height specified with this version, use the application version set
 		// when constructing the multi plexer.
-		currentVersion, err = m.versions.GetForName(m.applicationVersion)
+		currentVersion, err = m.versions.GetForNumber(m.applicationVersion)
 		if err != nil {
 			return nil, fmt.Errorf("failed to get app for height %d: %w", height, err)
 		}
@@ -344,15 +344,15 @@ func (m *Multiplexer) VerifyVoteExtension(_ context.Context, req *abci.RequestVe
 
 // getDesiredVersion ensures that the provided applicationVersion and height are mutually exclusive
 // and returns the correct Version from the Versions array.
-func getDesiredVersion(applicationVersion string, height int64, versions Versions) (Version, error) {
-	if height > 0 && applicationVersion != "" {
+func getDesiredVersion(applicationVersion uint64, height int64, versions Versions) (Version, error) {
+	if height > 0 && applicationVersion != 0 {
 		return Version{}, fmt.Errorf("application version and height cannot be provided at the same time: %w", ErrInvalidArgument)
 	}
 
 	// If height is 0, get the Genesis version
-	if height >= 0 && applicationVersion == "" {
+	if height >= 0 && applicationVersion == 0 {
 		return versions.GetForHeight(height)
 	}
 
-	return versions.GetForName(applicationVersion)
+	return versions.GetForNumber(applicationVersion)
 }

@@ -10,6 +10,7 @@ import (
 // Version defines the configuration for remote apps.
 type Version struct {
 	Name              string
+	Number            uint64
 	ABCIClientVersion ABCIClientVersion
 	Appd              *appd.Appd
 	UntilHeight       int64
@@ -62,6 +63,16 @@ func (v Versions) GetForName(name string) (Version, error) {
 		}
 	}
 	return Version{}, fmt.Errorf("%w: %s", ErrNoVersionFound, name)
+}
+
+// GetForNumber returns the version for a given number.
+func (v Versions) GetForNumber(number uint64) (Version, error) {
+	for _, version := range v {
+		if version.Number == number {
+			return version, nil
+		}
+	}
+	return Version{}, fmt.Errorf("%w: %d", ErrNoVersionFound, number)
 }
 
 // GetForHeight returns the version for a given height.

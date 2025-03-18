@@ -9,7 +9,7 @@ import (
 func TestGetDesiredVersion(t *testing.T) {
 	tests := []struct {
 		name               string
-		applicationVersion string
+		applicationVersion uint64
 		height             int64
 		versions           Versions
 		expectedVersion    Version
@@ -17,41 +17,41 @@ func TestGetDesiredVersion(t *testing.T) {
 	}{
 		{
 			name:               "height provided and version found",
-			applicationVersion: "",
+			applicationVersion: 0,
 			height:             10,
-			versions:           Versions{{Name: "v1", UntilHeight: 5}, {Name: "v2", UntilHeight: 10}},
-			expectedVersion:    Version{Name: "v2", UntilHeight: 10},
+			versions:           Versions{{Name: "v1", Number: 1, UntilHeight: 5}, {Name: "v2", Number: 2, UntilHeight: 10}},
+			expectedVersion:    Version{Name: "v2", Number: 2, UntilHeight: 10},
 			expectedError:      nil,
 		},
 		{
-			name:               "name provided and version found",
-			applicationVersion: "v1",
+			name:               "applicationVersion provided and version found",
+			applicationVersion: 1,
 			height:             0,
-			versions:           Versions{{Name: "v1", UntilHeight: 5}, {Name: "v2", UntilHeight: 10}},
-			expectedVersion:    Version{Name: "v1", UntilHeight: 5},
+			versions:           Versions{{Name: "v1", Number: 1, UntilHeight: 5}, {Name: "v2", Number: 2, UntilHeight: 10}},
+			expectedVersion:    Version{Name: "v1", Number: 1, UntilHeight: 5},
 			expectedError:      nil,
 		},
 		{
-			name:               "both height and name provided",
-			applicationVersion: "v1",
+			name:               "both height and applicationVersion provided",
+			applicationVersion: 1,
 			height:             10,
-			versions:           Versions{{Name: "v1", UntilHeight: 5}, {Name: "v2", UntilHeight: 10}},
+			versions:           Versions{{Name: "v1", Number: 1, UntilHeight: 5}, {Name: "v2", Number: 2, UntilHeight: 10}},
 			expectedVersion:    Version{},
 			expectedError:      ErrInvalidArgument,
 		},
 		{
 			name:               "height provided but no version found",
-			applicationVersion: "",
+			applicationVersion: 0,
 			height:             20,
-			versions:           Versions{{Name: "v1", UntilHeight: 5}, {Name: "v2", UntilHeight: 10}},
+			versions:           Versions{{Name: "v1", Number: 1, UntilHeight: 5}, {Name: "v2", Number: 2, UntilHeight: 10}},
 			expectedVersion:    Version{},
 			expectedError:      ErrNoVersionFound,
 		},
 		{
-			name:               "name provided but no version found",
-			applicationVersion: "v3",
+			name:               "applicationVersion provided but no version found",
+			applicationVersion: 3,
 			height:             0,
-			versions:           Versions{{Name: "v1", UntilHeight: 5}, {Name: "v2", UntilHeight: 10}},
+			versions:           Versions{{Name: "v1", Number: 1, UntilHeight: 5}, {Name: "v2", Number: 2, UntilHeight: 10}},
 			expectedVersion:    Version{},
 			expectedError:      ErrNoVersionFound,
 		},
