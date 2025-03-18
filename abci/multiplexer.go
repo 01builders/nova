@@ -188,7 +188,7 @@ func (m *Multiplexer) getAppForHeight(height int64) (servertypes.ABCI, error) {
 
 	switch currentVersion.ABCIClientVersion {
 	case ABCIClientVersion1:
-		return NewRemoteABCIClientV1(m.conn), nil
+		return NewRemoteABCIClientV1(m.conn, currentVersion.Number), nil
 	case ABCIClientVersion2:
 		return NewRemoteABCIClientV2(m.conn), nil
 	}

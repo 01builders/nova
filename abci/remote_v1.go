@@ -21,12 +21,16 @@ type RemoteABCIClientV1 struct {
 	// retainLastHeight is the height is set in finalize block
 	// and returned in commit
 	retainLastHeight int64
+
+	// appVersion is the consensus app version for this client.
+	appVersion uint64
 }
 
 // NewRemoteABCIClientV1 returns a new ABCI Client (using ABCI v1).
 // The client behaves like Tendermint for the server side (the application side).
-func NewRemoteABCIClientV1(conn *grpc.ClientConn) *RemoteABCIClientV1 {
+func NewRemoteABCIClientV1(conn *grpc.ClientConn, appVersion uint64) *RemoteABCIClientV1 {
 	return &RemoteABCIClientV1{
+		appVersion:            appVersion,
 		ABCIApplicationClient: abciv1.NewABCIApplicationClient(conn),
 	}
 }
@@ -89,7 +93,7 @@ func (a *RemoteABCIClientV1) FinalizeBlock(req *abciv2.RequestFinalizeBlock) (*a
 		Header: typesv1.Header{
 			Version: versionv1.Consensus{
 				Block: 0, // TODO: hardcoded as not available in v0.38 fork
-				App:   3, // TODO: hardcoded as not available in v0.38 fork
+				App:   a.appVersion,
 			},
 			ChainID:            "", // TODO: hardcoded as not available in v0.38 fork
 			Height:             req.Height,
@@ -268,7 +272,7 @@ func (a *RemoteABCIClientV1) OfferSnapshot(req *abciv2.RequestOfferSnapshot) (*a
 				Metadata: req.Snapshot.Metadata,
 			},
 			AppHash:    req.AppHash,
-			AppVersion: 3, // TODO: hardcoded as not available in v0.38 fork
+			AppVersion: a.appVersion,
 		},
 		grpc.WaitForReady(true),
 	)
@@ -310,7 +314,7 @@ func (a *RemoteABCIClientV1) ProcessProposal(req *abciv2.RequestProcessProposal)
 		Header: typesv1.Header{
 			Version: versionv1.Consensus{
 				Block: 0, // TODO: hardcoded as not available in v0.38 fork
-				App:   3, // TODO: hardcoded as not available in v0.38 fork
+				App:   a.appVersion,
 			},
 			ChainID:            "", // TODO: hardcoded as not available in v0.38 fork
 			Height:             req.Height,
