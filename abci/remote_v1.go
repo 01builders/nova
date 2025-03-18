@@ -268,8 +268,7 @@ func (a *RemoteABCIClientV1) OfferSnapshot(req *abciv2.RequestOfferSnapshot) (*a
 func (a *RemoteABCIClientV1) PrepareProposal(req *abciv2.RequestPrepareProposal) (*abciv2.ResponsePrepareProposal, error) {
 	resp, err := a.ABCIApplicationClient.PrepareProposal(context.Background(), &abciv1.RequestPrepareProposal{
 		BlockData: &typesv1.Data{
-			Txs:        req.Txs,
-			SquareSize: 0, // TODO: hardcoded as not available in v0.38 fork
+			Txs: req.Txs,
 		},
 		BlockDataSize: math.MaxInt32, // TODO: hardcoded as not available in v0.38 fork
 		ChainId:       "",            // TODO: hardcoded as not available in v0.38 fork
@@ -282,7 +281,9 @@ func (a *RemoteABCIClientV1) PrepareProposal(req *abciv2.RequestPrepareProposal)
 	}
 
 	return &abciv2.ResponsePrepareProposal{
-		Txs: resp.BlockData.Txs,
+		Txs:          resp.BlockData.Txs,
+		SquareSize:   resp.BlockData.SquareSize,
+		DataRootHash: resp.BlockData.Hash,
 	}, nil
 }
 
@@ -302,8 +303,8 @@ func (a *RemoteABCIClientV1) ProcessProposal(req *abciv2.RequestProcessProposal)
 		},
 		BlockData: &typesv1.Data{
 			Txs:        req.Txs,
-			SquareSize: 0, // TODO: hardcoded as not available in v0.38 fork
-			Hash:       req.Hash,
+			SquareSize: req.SquareSize,
+			Hash:       req.DataRootHash,
 		},
 	},
 		grpc.WaitForReady(true))
