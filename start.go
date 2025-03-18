@@ -12,6 +12,7 @@ import (
 	"cosmossdk.io/log"
 	"cosmossdk.io/store/rootmulti"
 	"github.com/01builders/nova/abci"
+	cmabci "github.com/cometbft/cometbft/abci/types"
 	cmtcfg "github.com/cometbft/cometbft/config"
 	"github.com/cometbft/cometbft/node"
 	"github.com/cometbft/cometbft/p2p"
@@ -180,11 +181,18 @@ func startCmtNode(
 		return nil, cleanupFn, err
 	}
 
+	// Query the version from app.Info and log it
+	resp, err := app.Info(&cmabci.RequestInfo{})
+	if err != nil {
+		return nil, cleanupFn, err
+	}
+
 	clientCreator, multiplexerCleanup, err := abci.NewMultiplexer(
 		svrCtx.Logger.With("multiplexer"),
 		svrCtx.Viper,
 		app,
 		versions,
+		resp.Version,
 		currentHeight,
 	)
 	if err != nil {

@@ -1,15 +1,11 @@
 package abci
 
 import (
-	"errors"
 	"fmt"
 	"sort"
 
 	"github.com/01builders/nova/appd"
 )
-
-// ErrNoVersionFound is returned when no remote version is found for a given height.
-var ErrNoVersionFound = errors.New("no version found")
 
 // Version defines the configuration for remote apps.
 type Version struct {
@@ -70,6 +66,10 @@ func (v Versions) GetForName(name string) (Version, error) {
 
 // GetForHeight returns the version for a given height.
 func (v Versions) GetForHeight(height int64) (Version, error) {
+	if height == 0 {
+		return v.GenesisVersion()
+	}
+
 	var selectedVersion Version
 	for _, version := range v {
 		if version.UntilHeight >= height {

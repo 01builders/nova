@@ -40,6 +40,7 @@ func NewMultiplexer(
 	v *viper.Viper,
 	latestApp servertypes.ABCI,
 	versions Versions,
+	applicationVersion string,
 	currentHeight int64,
 ) (proxy.ClientCreator, func() error, error) {
 	var noOpCleanUp = func() error {
@@ -63,11 +64,8 @@ func NewMultiplexer(
 	)
 
 	// prepare correct version
-	if currentHeight == 0 {
-		currentVersion, err = versions.GenesisVersion()
-	} else {
-		currentVersion, err = versions.GetForHeight(currentHeight)
-	}
+	currentVersion, err = getDesiredVersion(applicationVersion, currentHeight, versions)
+
 	if err != nil && errors.Is(err, ErrNoVersionFound) {
 		return proxy.NewLocalClientCreator(wrapper), noOpCleanUp, nil // no version found, assume latest
 	} else if err != nil {
@@ -335,4 +333,19 @@ func (m *Multiplexer) VerifyVoteExtension(_ context.Context, req *abci.RequestVe
 		return nil, fmt.Errorf("failed to get app for height %d: %w", req.Height, err)
 	}
 	return app.VerifyVoteExtension(req)
+}
+
+// getDesiredVersion ensures that the provided applicationVersion and height are mutually exclusive
+// and returns the correct Version from the Versions array.
+func getDesiredVersion(applicationVersion string, height int64, versions Versions) (Version, error) {
+	if height > 0 && applicationVersion != "" {
+		return Version{}, fmt.Errorf("application version and height cannot be provided at the same time: %w", ErrInvalidArgument)
+	}
+
+	// If height is 0, get the Genesis version
+	if height >= 0 && applicationVersion == "" {
+		return versions.GetForHeight(height)
+	}
+
+	return versions.GetForName(applicationVersion)
 }
