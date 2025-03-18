@@ -128,9 +128,24 @@ func (a *RemoteABCIClientV1) FinalizeBlock(req *abciv2.RequestFinalizeBlock) (*a
 	}
 	events = append(events, abciEventV1ToV2(endBlockResp.Events...)...)
 
+	// convert tx results
+	var txResults []*abciv2.ExecTxResult
+	for _, commitBlockResp := range commitBlockResps {
+		txResults = append(txResults, &abciv2.ExecTxResult{
+			Code:      commitBlockResp.Code,
+			Data:      commitBlockResp.Data,
+			Log:       commitBlockResp.Log,
+			Info:      commitBlockResp.Info,
+			GasWanted: commitBlockResp.GasWanted,
+			GasUsed:   commitBlockResp.GasUsed,
+			Events:    abciEventV1ToV2(commitBlockResp.Events...),
+			Codespace: commitBlockResp.Codespace,
+		})
+	}
+
 	return &abciv2.ResponseFinalizeBlock{
 		Events:                events,
-		TxResults:             nil,
+		TxResults:             txResults,
 		ValidatorUpdates:      validatorUpdatesV1ToV2(endBlockResp.ValidatorUpdates),
 		ConsensusParamUpdates: nil,
 		AppHash:               nil,
