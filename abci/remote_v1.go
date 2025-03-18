@@ -6,7 +6,6 @@ import (
 
 	"google.golang.org/grpc"
 
-	abci "github.com/cometbft/cometbft/abci/types"
 	abciv2 "github.com/cometbft/cometbft/abci/types"
 	cryptov2 "github.com/cometbft/cometbft/proto/tendermint/crypto"
 	typesv2 "github.com/cometbft/cometbft/proto/tendermint/types"
@@ -18,6 +17,10 @@ import (
 
 type RemoteABCIClientV1 struct {
 	abciv1.ABCIApplicationClient
+
+	// retainLastHeight is the height is set in finalize block
+	// and returned in commit
+	retainLastHeight int64
 }
 
 // NewRemoteABCIClientV1 returns a new ABCI Client (using ABCI v1).
@@ -44,7 +47,7 @@ func (a *RemoteABCIClientV1) ApplySnapshotChunk(req *abciv2.RequestApplySnapshot
 	}
 
 	return &abciv2.ResponseApplySnapshotChunk{
-		Result:        abci.ResponseApplySnapshotChunk_Result(resp.Result),
+		Result:        abciv2.ResponseApplySnapshotChunk_Result(resp.Result),
 		RefetchChunks: resp.RefetchChunks,
 		RejectSenders: resp.RejectSenders,
 	}, nil
@@ -74,24 +77,28 @@ func (a *RemoteABCIClientV1) CheckTx(req *abciv2.RequestCheckTx) (*abciv2.Respon
 
 // Commit implements abciv2.ABCI
 func (a *RemoteABCIClientV1) Commit() (*abciv2.ResponseCommit, error) {
-	resp, err := a.ABCIApplicationClient.Commit(context.Background(), &abciv1.RequestCommit{}, grpc.WaitForReady(true))
-	if err != nil {
-		return nil, err
-	}
-
 	return &abciv2.ResponseCommit{
-		// Data:         resp.Data, // TODO: there no data here.
-		RetainHeight: resp.RetainHeight,
+		RetainHeight: a.retainLastHeight,
 	}, nil
 }
 
 // FinalizeBlock implements abciv2.ABCI
 func (a *RemoteABCIClientV1) FinalizeBlock(req *abciv2.RequestFinalizeBlock) (*abciv2.ResponseFinalizeBlock, error) {
 	beginBlockResp, err := a.ABCIApplicationClient.BeginBlock(context.Background(), &abciv1.RequestBeginBlock{
-		Hash:                req.Hash,
-		Header:              typesv1.Header{},
-		LastCommitInfo:      abciv1.LastCommitInfo{},
-		ByzantineValidators: []abciv1.Evidence{},
+		Hash: req.Hash,
+		Header: typesv1.Header{
+			Version: versionv1.Consensus{
+				Block: 0, // TODO: hardcoded as not available in v0.38 fork
+				App:   3, // TODO: hardcoded as not available in v0.38 fork
+			},
+			ChainID:            "", // TODO: hardcoded as not available in v0.38 fork
+			Height:             req.Height,
+			Time:               req.Time,
+			NextValidatorsHash: req.NextValidatorsHash,
+			ProposerAddress:    req.ProposerAddress,
+		},
+		LastCommitInfo:      commitInfoV2ToV1(&req.DecidedLastCommit),
+		ByzantineValidators: evidenceV2ToV1(req.Misbehavior),
 	}, grpc.WaitForReady(true))
 	if err != nil {
 		return nil, err
@@ -128,12 +135,36 @@ func (a *RemoteABCIClientV1) FinalizeBlock(req *abciv2.RequestFinalizeBlock) (*a
 	}
 	events = append(events, abciEventV1ToV2(endBlockResp.Events...)...)
 
+	// convert tx results
+	var txResults []*abciv2.ExecTxResult
+	for _, commitBlockResp := range commitBlockResps {
+		txResults = append(txResults, &abciv2.ExecTxResult{
+			Code:      commitBlockResp.Code,
+			Data:      commitBlockResp.Data,
+			Log:       commitBlockResp.Log,
+			Info:      commitBlockResp.Info,
+			GasWanted: commitBlockResp.GasWanted,
+			GasUsed:   commitBlockResp.GasUsed,
+			Events:    abciEventV1ToV2(commitBlockResp.Events...),
+			Codespace: commitBlockResp.Codespace,
+		})
+	}
+
+	// commit result
+	commitResp, err := a.ABCIApplicationClient.Commit(context.Background(), &abciv1.RequestCommit{}, grpc.WaitForReady(true))
+	if err != nil {
+		return nil, err
+	}
+
+	// set the retain height, used in commit noop
+	a.retainLastHeight = commitResp.RetainHeight
+
 	return &abciv2.ResponseFinalizeBlock{
 		Events:                events,
-		TxResults:             nil,
+		TxResults:             txResults,
 		ValidatorUpdates:      validatorUpdatesV1ToV2(endBlockResp.ValidatorUpdates),
-		ConsensusParamUpdates: nil,
-		AppHash:               nil,
+		ConsensusParamUpdates: consensusParamsV1ToV2(endBlockResp.ConsensusParamUpdates),
+		AppHash:               commitResp.Data,
 	}, nil
 }
 
@@ -159,24 +190,10 @@ func (a *RemoteABCIClientV1) Info(req *abciv2.RequestInfo) (*abciv2.ResponseInfo
 
 // InitChain implements abciv2.ABCI
 func (a *RemoteABCIClientV1) InitChain(req *abciv2.RequestInitChain) (*abciv2.ResponseInitChain, error) {
-	consensusParamsV1 := &abciv1.ConsensusParams{ // TODO nil checks
-		Block: &abciv1.BlockParams{
-			MaxBytes: req.ConsensusParams.Block.MaxBytes,
-			MaxGas:   req.ConsensusParams.Block.MaxGas,
-		},
-		Evidence: &typesv1.EvidenceParams{
-			MaxAgeNumBlocks: req.ConsensusParams.Evidence.MaxAgeNumBlocks,
-			MaxAgeDuration:  req.ConsensusParams.Evidence.MaxAgeDuration,
-		},
-		Version: &typesv1.VersionParams{
-			AppVersion: req.ConsensusParams.Version.App,
-		},
-	}
-
 	resp, err := a.ABCIApplicationClient.InitChain(context.Background(), &abciv1.RequestInitChain{
 		Time:            req.Time,
 		ChainId:         req.ChainId,
-		ConsensusParams: consensusParamsV1,
+		ConsensusParams: consensusParamsV2ToV1(req.ConsensusParams),
 		Validators:      validatorUpdatesV2ToV1(req.Validators),
 		AppStateBytes:   req.AppStateBytes,
 		InitialHeight:   req.InitialHeight,
@@ -185,22 +202,8 @@ func (a *RemoteABCIClientV1) InitChain(req *abciv2.RequestInitChain) (*abciv2.Re
 		return nil, err
 	}
 
-	consensusParamsV2 := &typesv2.ConsensusParams{
-		Block: &typesv2.BlockParams{
-			MaxBytes: resp.ConsensusParams.Block.MaxBytes,
-			MaxGas:   resp.ConsensusParams.Block.MaxGas,
-		},
-		Evidence: &typesv2.EvidenceParams{
-			MaxAgeNumBlocks: resp.ConsensusParams.Evidence.MaxAgeNumBlocks,
-			MaxAgeDuration:  resp.ConsensusParams.Evidence.MaxAgeDuration,
-		},
-		Version: &typesv2.VersionParams{
-			App: resp.ConsensusParams.Version.AppVersion,
-		},
-	}
-
 	return &abciv2.ResponseInitChain{
-		ConsensusParams: consensusParamsV2,
+		ConsensusParams: consensusParamsV1ToV2(resp.ConsensusParams),
 		Validators:      validatorUpdatesV1ToV2(resp.Validators),
 		AppHash:         resp.AppHash,
 	}, nil
@@ -233,7 +236,7 @@ func (a *RemoteABCIClientV1) ListSnapshots(req *abciv2.RequestListSnapshots) (*a
 }
 
 // LoadSnapshotChunk implements abciv2.ABCI
-func (a *RemoteABCIClientV1) LoadSnapshotChunk(req *abciv2.RequestLoadSnapshotChunk) (*abci.ResponseLoadSnapshotChunk, error) {
+func (a *RemoteABCIClientV1) LoadSnapshotChunk(req *abciv2.RequestLoadSnapshotChunk) (*abciv2.ResponseLoadSnapshotChunk, error) {
 	resp, err := a.ABCIApplicationClient.LoadSnapshotChunk(
 		context.Background(),
 		&abciv1.RequestLoadSnapshotChunk{
@@ -247,7 +250,7 @@ func (a *RemoteABCIClientV1) LoadSnapshotChunk(req *abciv2.RequestLoadSnapshotCh
 		return nil, err
 	}
 
-	return &abci.ResponseLoadSnapshotChunk{
+	return &abciv2.ResponseLoadSnapshotChunk{
 		Chunk: resp.GetChunk(),
 	}, nil
 }
@@ -274,7 +277,7 @@ func (a *RemoteABCIClientV1) OfferSnapshot(req *abciv2.RequestOfferSnapshot) (*a
 	}
 
 	return &abciv2.ResponseOfferSnapshot{
-		Result: abci.ResponseOfferSnapshot_Result(resp.Result),
+		Result: abciv2.ResponseOfferSnapshot_Result(resp.Result),
 	}, nil
 }
 
@@ -282,8 +285,7 @@ func (a *RemoteABCIClientV1) OfferSnapshot(req *abciv2.RequestOfferSnapshot) (*a
 func (a *RemoteABCIClientV1) PrepareProposal(req *abciv2.RequestPrepareProposal) (*abciv2.ResponsePrepareProposal, error) {
 	resp, err := a.ABCIApplicationClient.PrepareProposal(context.Background(), &abciv1.RequestPrepareProposal{
 		BlockData: &typesv1.Data{
-			Txs:        req.Txs,
-			SquareSize: 0, // TODO: hardcoded as not available in v0.38 fork
+			Txs: req.Txs,
 		},
 		BlockDataSize: math.MaxInt32, // TODO: hardcoded as not available in v0.38 fork
 		ChainId:       "",            // TODO: hardcoded as not available in v0.38 fork
@@ -296,7 +298,9 @@ func (a *RemoteABCIClientV1) PrepareProposal(req *abciv2.RequestPrepareProposal)
 	}
 
 	return &abciv2.ResponsePrepareProposal{
-		Txs: resp.BlockData.Txs,
+		Txs:          resp.BlockData.Txs,
+		SquareSize:   resp.BlockData.SquareSize,
+		DataRootHash: resp.BlockData.Hash,
 	}, nil
 }
 
@@ -306,18 +310,19 @@ func (a *RemoteABCIClientV1) ProcessProposal(req *abciv2.RequestProcessProposal)
 		Header: typesv1.Header{
 			Version: versionv1.Consensus{
 				Block: 0, // TODO: hardcoded as not available in v0.38 fork
-				App:   0, // TODO: hardcoded as not available in v0.38 fork
+				App:   3, // TODO: hardcoded as not available in v0.38 fork
 			},
 			ChainID:            "", // TODO: hardcoded as not available in v0.38 fork
 			Height:             req.Height,
 			Time:               req.Time,
 			NextValidatorsHash: req.NextValidatorsHash,
 			ProposerAddress:    req.ProposerAddress,
+			DataHash:           req.DataRootHash,
 		},
 		BlockData: &typesv1.Data{
 			Txs:        req.Txs,
-			SquareSize: 0, // TODO: hardcoded as not available in v0.38 fork
-			Hash:       req.Hash,
+			SquareSize: req.SquareSize,
+			Hash:       req.DataRootHash,
 		},
 	},
 		grpc.WaitForReady(true))
@@ -456,4 +461,100 @@ func validatorUpdatesV2ToV1(validators []abciv2.ValidatorUpdate) []abciv1.Valida
 	}
 
 	return v1Updates
+}
+
+func consensusParamsV1ToV2(params *abciv1.ConsensusParams) *typesv2.ConsensusParams {
+	consensusParamsV2 := &typesv2.ConsensusParams{}
+	if blockParams := params.GetBlock(); blockParams != nil {
+		consensusParamsV2.Block = &typesv2.BlockParams{
+			MaxBytes: blockParams.MaxBytes,
+			MaxGas:   blockParams.MaxGas,
+		}
+	}
+
+	if evidenceParams := params.GetEvidence(); evidenceParams != nil {
+		consensusParamsV2.Evidence = &typesv2.EvidenceParams{
+			MaxAgeNumBlocks: evidenceParams.MaxAgeNumBlocks,
+			MaxAgeDuration:  evidenceParams.MaxAgeDuration,
+		}
+	}
+
+	if versionParams := params.GetVersion(); versionParams != nil {
+		consensusParamsV2.Version = &typesv2.VersionParams{
+			App: versionParams.AppVersion,
+		}
+	}
+
+	if validatorParams := params.GetValidator(); validatorParams != nil {
+		consensusParamsV2.Validator = &typesv2.ValidatorParams{
+			PubKeyTypes: validatorParams.PubKeyTypes,
+		}
+	}
+
+	return consensusParamsV2
+}
+
+func consensusParamsV2ToV1(params *typesv2.ConsensusParams) *abciv1.ConsensusParams {
+	consensusParamsV1 := &abciv1.ConsensusParams{}
+	if blockParams := params.GetBlock(); blockParams != nil {
+		consensusParamsV1.Block = &abciv1.BlockParams{
+			MaxBytes: blockParams.MaxBytes,
+			MaxGas:   blockParams.MaxGas,
+		}
+	}
+
+	if evidenceParams := params.GetEvidence(); evidenceParams != nil {
+		consensusParamsV1.Evidence = &typesv1.EvidenceParams{
+			MaxAgeNumBlocks: evidenceParams.MaxAgeNumBlocks,
+			MaxAgeDuration:  evidenceParams.MaxAgeDuration,
+		}
+	}
+
+	if versionParams := params.GetVersion(); versionParams != nil {
+		consensusParamsV1.Version = &typesv1.VersionParams{
+			AppVersion: versionParams.App,
+		}
+	}
+
+	if validatorParams := params.GetValidator(); validatorParams != nil {
+		consensusParamsV1.Validator = &typesv1.ValidatorParams{
+			PubKeyTypes: validatorParams.PubKeyTypes,
+		}
+	}
+	return consensusParamsV1
+}
+
+func commitInfoV2ToV1(info *abciv2.CommitInfo) abciv1.LastCommitInfo {
+	votes := make([]abciv1.VoteInfo, 0, len(info.Votes))
+	for _, vote := range info.Votes {
+		votes = append(votes, abciv1.VoteInfo{
+			Validator: abciv1.Validator{
+				Address: vote.Validator.Address,
+				Power:   vote.Validator.Power,
+			},
+			SignedLastBlock: vote.BlockIdFlag == typesv2.BlockIDFlagCommit,
+		})
+	}
+	return abciv1.LastCommitInfo{
+		Round: info.Round,
+		Votes: votes,
+	}
+}
+
+func evidenceV2ToV1(evidence []abciv2.Misbehavior) []abciv1.Evidence {
+	v1Evidence := make([]abciv1.Evidence, len(evidence))
+	for i, ev := range evidence {
+		v1Evidence[i] = abciv1.Evidence{
+			Type:   abciv1.EvidenceType(ev.Type),
+			Height: ev.Height,
+			Validator: abciv1.Validator{
+				Address: ev.Validator.Address,
+				Power:   ev.Validator.Power,
+			},
+			Time:             ev.Time,
+			TotalVotingPower: ev.TotalVotingPower,
+		}
+	}
+
+	return v1Evidence
 }
