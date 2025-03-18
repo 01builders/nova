@@ -15,6 +15,24 @@ import (
 	versionv1 "github.com/tendermint/tendermint/proto/tendermint/version"
 )
 
+// TEMPORARY.
+// appVersionFromHeight hardcode the app version switch for celestia v1, v2, v3.
+// this avoids an extra rpc to get the app version from the app.
+// given this data is in the past and never changes, we can hardcode it.
+// only issue is that it works only with celestia mainnet.
+func appVersionFromHeight(height int64) uint64 {
+	switch {
+	// case height >= 2993219:
+	// 	return 3
+	// case height >= 2371495:
+	// 	return 2
+	// case height >= 0:
+	// 	return 1
+	default:
+		return 3
+	}
+}
+
 type RemoteABCIClientV1 struct {
 	abciv1.ABCIApplicationClient
 
@@ -88,10 +106,8 @@ func (a *RemoteABCIClientV1) FinalizeBlock(req *abciv2.RequestFinalizeBlock) (*a
 		Hash: req.Hash,
 		Header: typesv1.Header{
 			Version: versionv1.Consensus{
-				Block: 0, // TODO: hardcoded as not available in v0.38 fork
-				App:   3, // TODO: hardcoded as not available in v0.38 fork
+				App: appVersionFromHeight(req.Height),
 			},
-			ChainID:            "", // TODO: hardcoded as not available in v0.38 fork
 			Height:             req.Height,
 			Time:               req.Time,
 			NextValidatorsHash: req.NextValidatorsHash,
@@ -268,7 +284,7 @@ func (a *RemoteABCIClientV1) OfferSnapshot(req *abciv2.RequestOfferSnapshot) (*a
 				Metadata: req.Snapshot.Metadata,
 			},
 			AppHash:    req.AppHash,
-			AppVersion: 3, // TODO: hardcoded as not available in v0.38 fork
+			AppVersion: req.AppVersion,
 		},
 		grpc.WaitForReady(true),
 	)
@@ -288,7 +304,6 @@ func (a *RemoteABCIClientV1) PrepareProposal(req *abciv2.RequestPrepareProposal)
 			Txs: req.Txs,
 		},
 		BlockDataSize: math.MaxInt32, // TODO: hardcoded as not available in v0.38 fork
-		ChainId:       "",            // TODO: hardcoded as not available in v0.38 fork
 		Height:        req.Height,
 		Time:          req.Time,
 	},
@@ -309,10 +324,8 @@ func (a *RemoteABCIClientV1) ProcessProposal(req *abciv2.RequestProcessProposal)
 	resp, err := a.ABCIApplicationClient.ProcessProposal(context.Background(), &abciv1.RequestProcessProposal{
 		Header: typesv1.Header{
 			Version: versionv1.Consensus{
-				Block: 0, // TODO: hardcoded as not available in v0.38 fork
-				App:   3, // TODO: hardcoded as not available in v0.38 fork
+				App: appVersionFromHeight(req.Height),
 			},
-			ChainID:            "", // TODO: hardcoded as not available in v0.38 fork
 			Height:             req.Height,
 			Time:               req.Time,
 			NextValidatorsHash: req.NextValidatorsHash,
