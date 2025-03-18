@@ -6,7 +6,6 @@ import (
 
 	"google.golang.org/grpc"
 
-	abci "github.com/cometbft/cometbft/abci/types"
 	abciv2 "github.com/cometbft/cometbft/abci/types"
 	cryptov2 "github.com/cometbft/cometbft/proto/tendermint/crypto"
 	typesv2 "github.com/cometbft/cometbft/proto/tendermint/types"
@@ -44,7 +43,7 @@ func (a *RemoteABCIClientV1) ApplySnapshotChunk(req *abciv2.RequestApplySnapshot
 	}
 
 	return &abciv2.ResponseApplySnapshotChunk{
-		Result:        abci.ResponseApplySnapshotChunk_Result(resp.Result),
+		Result:        abciv2.ResponseApplySnapshotChunk_Result(resp.Result),
 		RefetchChunks: resp.RefetchChunks,
 		RejectSenders: resp.RejectSenders,
 	}, nil
@@ -220,7 +219,7 @@ func (a *RemoteABCIClientV1) ListSnapshots(req *abciv2.RequestListSnapshots) (*a
 }
 
 // LoadSnapshotChunk implements abciv2.ABCI
-func (a *RemoteABCIClientV1) LoadSnapshotChunk(req *abciv2.RequestLoadSnapshotChunk) (*abci.ResponseLoadSnapshotChunk, error) {
+func (a *RemoteABCIClientV1) LoadSnapshotChunk(req *abciv2.RequestLoadSnapshotChunk) (*abciv2.ResponseLoadSnapshotChunk, error) {
 	resp, err := a.ABCIApplicationClient.LoadSnapshotChunk(
 		context.Background(),
 		&abciv1.RequestLoadSnapshotChunk{
@@ -234,7 +233,7 @@ func (a *RemoteABCIClientV1) LoadSnapshotChunk(req *abciv2.RequestLoadSnapshotCh
 		return nil, err
 	}
 
-	return &abci.ResponseLoadSnapshotChunk{
+	return &abciv2.ResponseLoadSnapshotChunk{
 		Chunk: resp.GetChunk(),
 	}, nil
 }
@@ -261,7 +260,7 @@ func (a *RemoteABCIClientV1) OfferSnapshot(req *abciv2.RequestOfferSnapshot) (*a
 	}
 
 	return &abciv2.ResponseOfferSnapshot{
-		Result: abci.ResponseOfferSnapshot_Result(resp.Result),
+		Result: abciv2.ResponseOfferSnapshot_Result(resp.Result),
 	}, nil
 }
 
