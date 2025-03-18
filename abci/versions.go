@@ -3,8 +3,9 @@ package abci
 import (
 	"errors"
 	"fmt"
-	"github.com/01builders/nova/appd"
 	"sort"
+
+	"github.com/01builders/nova/appd"
 )
 
 // ErrNoVersionFound is returned when no remote version is found for a given height.
@@ -12,11 +13,12 @@ var ErrNoVersionFound = errors.New("no version found")
 
 // Version defines the configuration for remote apps.
 type Version struct {
-	Name        string
-	Appd        *appd.Appd
-	UntilHeight int64
-	PreHandler  string   // Command to run before starting the app
-	StartArgs   []string // Extra arguments to pass to the app
+	Name              string
+	ABCIClientVersion ABCIClientVersion
+	Appd              *appd.Appd
+	UntilHeight       int64
+	PreHandler        string   // Command to run before starting the app
+	StartArgs         []string // Extra arguments to pass to the app
 }
 
 type Versions []Version
@@ -102,7 +104,7 @@ func (v Version) GetStartArgs(args []string) []string {
 	// Default flags for standalone apps.
 	return append(args,
 		"--grpc.enable=true",
-		"--api.enable=false",
+		"--api.enable=true",
 		"--api.swagger=false",
 		"--with-tendermint=false",
 		"--transport=grpc",

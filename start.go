@@ -12,12 +12,10 @@ import (
 	"cosmossdk.io/log"
 	"cosmossdk.io/store/rootmulti"
 	"github.com/01builders/nova/abci"
-	cmtabci "github.com/cometbft/cometbft/abci/types"
 	cmtcfg "github.com/cometbft/cometbft/config"
 	"github.com/cometbft/cometbft/node"
 	"github.com/cometbft/cometbft/p2p"
 	pvm "github.com/cometbft/cometbft/privval"
-	"github.com/cometbft/cometbft/proxy"
 	"github.com/cometbft/cometbft/rpc/client/local"
 	cmttypes "github.com/cometbft/cometbft/types"
 	dbm "github.com/cosmos/cosmos-db"
@@ -54,9 +52,14 @@ func New(versions abci.Versions) StartCommandHandler {
 		svrCtx *server.Context,
 		clientCtx client.Context,
 		appCreator types.AppCreator,
-		_ bool,
+		withCmt bool,
 		_ server.StartCmdOptions,
 	) error {
+		if !withCmt {
+			svrCtx.Logger.Info("App cannot be started without CometBFT when using the multiplexer.")
+			return nil
+		}
+
 		return start(versions, svrCtx, clientCtx, appCreator)
 	}
 }
@@ -89,6 +92,7 @@ func start(versions abci.Versions, svrCtx *server.Context, clientCtx client.Cont
 		if err != nil {
 			return err
 		}
+
 		defer appCleanupFn()
 	}
 
@@ -99,27 +103,6 @@ func start(versions abci.Versions, svrCtx *server.Context, clientCtx client.Cont
 
 	emitServerInfoMetrics()
 
-	return startInProcess(versions, height, svrCtx, svrCfg, clientCtx, app, metrics)
-}
-
-func getCurrentHeight(rootDir string, v *viper.Viper) (int64, error) {
-	db, err := openDB(rootDir, server.GetAppDBBackend(v))
-	if err != nil {
-		return 0, err
-	}
-
-	return rootmulti.GetLatestVersion(db), db.Close()
-}
-
-func startInProcess(
-	versions abci.Versions,
-	currentHeight int64,
-	svrCtx *server.Context,
-	svrCfg serverconfig.Config,
-	clientCtx client.Context,
-	app types.Application,
-	metrics *telemetry.Metrics,
-) error {
 	cmtCfg := svrCtx.Config
 	gRPCOnly := svrCtx.Viper.GetBool(flagGRPCOnly)
 
@@ -129,12 +112,22 @@ func startInProcess(
 		svrCtx.Logger.Info("starting node in gRPC only mode; CometBFT is disabled")
 		svrCfg.GRPC.Enable = true
 	} else {
-		svrCtx.Logger.Info("starting node with ABCI CometBFT in-process")
-		tmNode, cleanupFn, err := startCmtNode(versions, currentHeight, ctx, cmtCfg, app, svrCtx)
+		if !usesLatestApp {
+			svrCtx.Logger.Info("starting node with multiplexer")
+		} else {
+			svrCtx.Logger.Info("starting node with latest app")
+		}
+		tmNode, cleanupFn, err := startCmtNode(
+			versions, height, ctx, cmtCfg, app, svrCtx, usesLatestApp,
+		)
 		if err != nil {
 			return err
 		}
 		defer cleanupFn()
+
+		if !usesLatestApp { // latestApp isn't used, use servers from remote app
+			return g.Wait()
+		}
 
 		// Add the tx service to the gRPC router. We only need to register this
 		// service if API or gRPC is enabled, and avoid doing so in the general
@@ -155,14 +148,22 @@ func startInProcess(
 		return err
 	}
 
-	err = startAPIServer(ctx, g, svrCfg, clientCtx, svrCtx, app, cmtCfg.RootDir, grpcSrv, metrics)
-	if err != nil {
+	if err = startAPIServer(ctx, g, svrCfg, clientCtx, svrCtx, app, cmtCfg.RootDir, grpcSrv, metrics); err != nil {
 		return err
 	}
 
 	// wait for signal capture and gracefully return
 	// we are guaranteed to be waiting for the "ListenForQuitSignals" goroutine.
 	return g.Wait()
+}
+
+func getCurrentHeight(rootDir string, v *viper.Viper) (int64, error) {
+	db, err := openDB(rootDir, server.GetAppDBBackend(v))
+	if err != nil {
+		return 0, err
+	}
+
+	return rootmulti.GetLatestVersion(db), db.Close()
 }
 
 func startCmtNode(
@@ -172,13 +173,14 @@ func startCmtNode(
 	cfg *cmtcfg.Config,
 	app types.Application,
 	svrCtx *server.Context,
+	isLatestApp bool,
 ) (tmNode *node.Node, cleanupFn func(), err error) {
 	nodeKey, err := p2p.LoadOrGenNodeKey(cfg.NodeKeyFile())
 	if err != nil {
 		return nil, cleanupFn, err
 	}
 
-	cmtApp, err := abci.NewMultiplexer(
+	clientCreator, multiplexerCleanup, err := abci.NewMultiplexer(
 		svrCtx.Logger.With("multiplexer"),
 		svrCtx.Viper,
 		app,
@@ -189,16 +191,16 @@ func startCmtNode(
 		return nil, cleanupFn, err
 	}
 
-	// Register cleanup handler for remote apps
-	setupRemoteAppCleanup(cmtApp, svrCtx)
-
+	if !isLatestApp {
+		// Register cleanup handler for remote apps
+		setupRemoteAppCleanup(svrCtx, multiplexerCleanup)
+	}
 	tmNode, err = node.NewNodeWithContext(
 		ctx,
 		cfg,
 		pvm.LoadOrGenFilePV(cfg.PrivValidatorKeyFile(), cfg.PrivValidatorStateFile()),
 		nodeKey,
-		// we use local client creator because the latest app shouldn't use grpc
-		proxy.NewLocalClientCreator(cmtApp),
+		clientCreator,
 		getGenDocProvider(cfg),
 		cmtcfg.DefaultDBProvider,
 		node.DefaultMetricsProvider(cfg.Instrumentation),
@@ -217,36 +219,31 @@ func startCmtNode(
 			_ = tmNode.Stop()
 		}
 
-		// also ensure we stop any remote apps
-		if multiplexer, ok := cmtApp.(*abci.Multiplexer); ok {
-			_ = multiplexer.Cleanup()
-		}
+		_ = multiplexerCleanup()
 	}
 
 	return tmNode, cleanupFn, nil
 }
 
 // setupRemoteAppCleanup ensures that remote app processes are terminated when the main process receives termination signals
-func setupRemoteAppCleanup(cmtApp cmtabci.Application, svrCtx *server.Context) {
-	if multiplexer, ok := cmtApp.(*abci.Multiplexer); ok {
-		sigCh := make(chan os.Signal, 1)
-		signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
+func setupRemoteAppCleanup(svrCtx *server.Context, cleanupFn func() error) {
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
 
-		go func() {
-			sig := <-sigCh
-			svrCtx.Logger.Info("Received signal, stopping remote apps...", "signal", sig)
+	go func() {
+		sig := <-sigCh
+		svrCtx.Logger.Info("Received signal, stopping remote apps...", "signal", sig)
 
-			if err := multiplexer.Cleanup(); err != nil {
-				svrCtx.Logger.Error("Error stopping remote apps", "err", err)
-			} else {
-				svrCtx.Logger.Info("Successfully stopped remote apps")
-			}
+		if err := cleanupFn(); err != nil {
+			svrCtx.Logger.Error("Error stopping remote apps", "err", err)
+		} else {
+			svrCtx.Logger.Info("Successfully stopped remote apps")
+		}
 
-			// Re-send the signal to allow the normal process termination
-			signal.Reset(os.Interrupt, syscall.SIGTERM)
-			syscall.Kill(os.Getpid(), sig.(syscall.Signal))
-		}()
-	}
+		// Re-send the signal to allow the normal process termination
+		signal.Reset(os.Interrupt, syscall.SIGTERM)
+		syscall.Kill(os.Getpid(), sig.(syscall.Signal))
+	}()
 }
 
 func getAndValidateConfig(svrCtx *server.Context) (serverconfig.Config, error) {
