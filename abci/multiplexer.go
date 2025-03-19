@@ -24,9 +24,9 @@ type Multiplexer struct {
 	logger log.Logger
 	mu     sync.Mutex
 
-	lastHeight         int64
-	applicationVersion uint64
-	started            bool
+	lastHeight     int64
+	lastAppVersion uint64
+	started        bool
 
 	latestApp     servertypes.ABCI
 	activeVersion Version
@@ -53,11 +53,10 @@ func NewMultiplexer(
 	}
 
 	wrapper := &Multiplexer{
-		logger:             logger,
-		latestApp:          latestApp,
-		versions:           versions.Sorted(),
-		lastHeight:         currentHeight,
-		applicationVersion: applicationVersion,
+		logger:     logger,
+		latestApp:  latestApp,
+		versions:   versions.Sorted(),
+		lastHeight: currentHeight,
 	}
 
 	var (
@@ -123,7 +122,7 @@ func NewMultiplexer(
 func (m *Multiplexer) getAppForHeight(height int64) (servertypes.ABCI, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-
+	
 	// use the latest app if the height is beyond all defined versions
 	if m.versions.ShouldLatestApp(height) {
 		// TODO: start the latest app here if not already started
@@ -133,12 +132,7 @@ func (m *Multiplexer) getAppForHeight(height int64) (servertypes.ABCI, error) {
 	// get the appropriate version for this height
 	currentVersion, err := m.versions.GetForHeight(height)
 	if err != nil {
-		// there is no height specified with this version, use the application version set
-		// when constructing the multi plexer.
-		currentVersion, err = m.versions.GetForNumber(m.applicationVersion)
-		if err != nil {
-			return nil, fmt.Errorf("failed to get app for height %d: %w", height, err)
-		}
+		return nil, fmt.Errorf("failed to get app for height %d: %w", height, err)
 	}
 
 	// check if we need to start the app or if we have a different app running
@@ -188,7 +182,7 @@ func (m *Multiplexer) getAppForHeight(height int64) (servertypes.ABCI, error) {
 
 	switch currentVersion.ABCIVersion {
 	case ABCIClientVersion1:
-		return NewRemoteABCIClientV1(m.conn, currentVersion.Number), nil
+		return NewRemoteABCIClientV1(m.conn), nil
 	case ABCIClientVersion2:
 		return NewRemoteABCIClientV2(m.conn), nil
 	}
@@ -258,12 +252,18 @@ func (m *Multiplexer) ExtendVote(ctx context.Context, req *abci.RequestExtendVot
 }
 
 func (m *Multiplexer) FinalizeBlock(_ context.Context, req *abci.RequestFinalizeBlock) (*abci.ResponseFinalizeBlock, error) {
-	m.lastHeight = req.Height
 	app, err := m.getAppForHeight(req.Height)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get app for height %d: %w", req.Height, err)
 	}
-	return app.FinalizeBlock(req)
+
+	resp, err := app.FinalizeBlock(req)
+
+	// update the last height and app version
+	m.lastHeight = req.Height
+	m.lastAppVersion = resp.ConsensusParamUpdates.GetVersion().App
+
+	return resp, err
 }
 
 func (m *Multiplexer) Info(_ context.Context, req *abci.RequestInfo) (*abci.ResponseInfo, error) {
