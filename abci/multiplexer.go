@@ -24,8 +24,9 @@ type Multiplexer struct {
 	logger log.Logger
 	mu     sync.Mutex
 
-	lastHeight int64
-	started    bool
+	lastHeight     int64
+	lastAppVersion uint64
+	started        bool
 
 	latestApp     servertypes.ABCI
 	activeVersion Version
@@ -253,14 +254,18 @@ func (m *Multiplexer) ExtendVote(ctx context.Context, req *abci.RequestExtendVot
 }
 
 func (m *Multiplexer) FinalizeBlock(_ context.Context, req *abci.RequestFinalizeBlock) (*abci.ResponseFinalizeBlock, error) {
-	m.lastHeight = req.Height
-
 	app, err := m.getAppForHeight(req.Height)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get app for height %d: %w", req.Height, err)
 	}
 
-	return app.FinalizeBlock(req)
+	resp, err := app.FinalizeBlock(req)
+
+	// update the last height and app version
+	m.lastHeight = req.Height
+	m.lastAppVersion = resp.ConsensusParamUpdates.GetVersion().App
+
+	return resp, err
 }
 
 func (m *Multiplexer) Info(_ context.Context, req *abci.RequestInfo) (*abci.ResponseInfo, error) {
