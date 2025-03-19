@@ -20,7 +20,8 @@ type RemoteABCIClientV1 struct {
 
 	// retainLastHeight is the height is set in finalize block
 	// and returned in commit
-	retainLastHeight int64
+	commitRetainLastHeight      int64
+	endBlockConsensusAppVersion uint64
 }
 
 // NewRemoteABCIClientV1 returns a new ABCI Client (using ABCI v1).
@@ -78,7 +79,7 @@ func (a *RemoteABCIClientV1) CheckTx(req *abciv2.RequestCheckTx) (*abciv2.Respon
 // Commit implements abciv2.ABCI
 func (a *RemoteABCIClientV1) Commit() (*abciv2.ResponseCommit, error) {
 	return &abciv2.ResponseCommit{
-		RetainHeight: a.retainLastHeight,
+		RetainHeight: a.commitRetainLastHeight,
 	}, nil
 }
 
@@ -88,7 +89,7 @@ func (a *RemoteABCIClientV1) FinalizeBlock(req *abciv2.RequestFinalizeBlock) (*a
 		Hash: req.Hash,
 		Header: typesv1.Header{
 			Version: versionv1.Consensus{
-				App: req.AppVersion,
+				App: a.endBlockConsensusAppVersion,
 			},
 			Height:             req.Height,
 			Time:               req.Time,
@@ -155,7 +156,9 @@ func (a *RemoteABCIClientV1) FinalizeBlock(req *abciv2.RequestFinalizeBlock) (*a
 	}
 
 	// set the retain height, used in commit noop
-	a.retainLastHeight = commitResp.RetainHeight
+	a.commitRetainLastHeight = commitResp.RetainHeight
+	// get the app version from the end block response
+	a.endBlockConsensusAppVersion = endBlockResp.GetConsensusParamUpdates().Version.AppVersion
 
 	return &abciv2.ResponseFinalizeBlock{
 		Events:                events,

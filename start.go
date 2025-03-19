@@ -2,6 +2,7 @@ package nova
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"net"
 	"os"
@@ -265,6 +266,10 @@ func getGenDocProvider(cfg *cmtcfg.Config) func() (*cmttypes.GenesisDoc, error) 
 		if err != nil {
 			return nil, err
 		}
+
+		fmt.Println("---getGenDocProvider----")
+		fmt.Println("appGenesis: app version", appGenesis.Consensus.Params.Version.App)
+		fmt.Println("---end getGenDocProvider----")
 
 		return appGenesis.ToGenesisDoc()
 	}

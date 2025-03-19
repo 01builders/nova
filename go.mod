@@ -5,7 +5,7 @@ go 1.23.1
 toolchain go1.24.1
 
 replace (
-	github.com/cometbft/cometbft => github.com/01builders/celestia-core v0.38.11-0.20250319115620-b37132fe2565 // https://github.com/celestiaorg/celestia-core/pull/1684
+	github.com/cometbft/cometbft => github.com/01builders/cometbft v0.0.0-20250303123948-a2b8ce5ddfe5
 	github.com/tendermint/tendermint => github.com/celestiaorg/celestia-core v1.45.0-tm-v0.34.35
 )
 
