@@ -20,7 +20,10 @@ type RemoteABCIClientV1 struct {
 
 	// retainLastHeight is the height is set in finalize block
 	// and returned in commit
-	commitRetainLastHeight      int64
+	commitRetainLastHeight int64
+	// infoConsensusVersion is the app version got from the info abci call
+	infoConsensusAppVersion uint64
+	// endBlockConsensusVersion is the app version got from the end block abci call
 	endBlockConsensusAppVersion uint64
 }
 
@@ -85,11 +88,16 @@ func (a *RemoteABCIClientV1) Commit() (*abciv2.ResponseCommit, error) {
 
 // FinalizeBlock implements abciv2.ABCI
 func (a *RemoteABCIClientV1) FinalizeBlock(req *abciv2.RequestFinalizeBlock) (*abciv2.ResponseFinalizeBlock, error) {
+	appVersion := a.endBlockConsensusAppVersion
+	if req.Height <= 1 {
+		appVersion = a.infoConsensusAppVersion
+	}
+
 	beginBlockResp, err := a.ABCIApplicationClient.BeginBlock(context.Background(), &abciv1.RequestBeginBlock{
 		Hash: req.Hash,
 		Header: typesv1.Header{
 			Version: versionv1.Consensus{
-				App: a.endBlockConsensusAppVersion,
+				App: appVersion,
 			},
 			Height:             req.Height,
 			Time:               req.Time,
@@ -179,6 +187,9 @@ func (a *RemoteABCIClientV1) Info(req *abciv2.RequestInfo) (*abciv2.ResponseInfo
 	if err != nil {
 		return nil, err
 	}
+
+	// set the app version from the response
+	a.infoConsensusAppVersion = resp.AppVersion
 
 	return &abciv2.ResponseInfo{
 		Data:             resp.Data,
