@@ -118,19 +118,8 @@ func start(versions abci.Versions, svrCtx *server.Context, clientCtx client.Cont
 		} else {
 			svrCtx.Logger.Info("starting node with latest app")
 		}
-
-		var appVersion uint64
-		if !usesLatestApp {
-			// if we are not using the latest version, we need to fetch the version
-			// from the latest version of the app.
-			appVersion, err = getAppVersion(svrCtx, appCreator)
-			if err != nil {
-				return err
-			}
-		}
-
 		tmNode, cleanupFn, err := startCmtNode(
-			versions, height, ctx, cmtCfg, app, svrCtx, usesLatestApp, appVersion,
+			versions, height, ctx, cmtCfg, app, svrCtx, usesLatestApp,
 		)
 		if err != nil {
 			return err
@@ -186,7 +175,6 @@ func startCmtNode(
 	app types.Application,
 	svrCtx *server.Context,
 	isLatestApp bool,
-	appVersion uint64,
 ) (tmNode *node.Node, cleanupFn func(), err error) {
 	nodeKey, err := p2p.LoadOrGenNodeKey(cfg.NodeKeyFile())
 	if err != nil {
@@ -199,9 +187,7 @@ func startCmtNode(
 		app,
 		versions,
 		currentHeight,
-		appVersion,
 	)
-
 	if err != nil {
 		return nil, cleanupFn, err
 	}
