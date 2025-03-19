@@ -9,13 +9,13 @@ import (
 
 // Version defines the configuration for remote apps.
 type Version struct {
-	Name              string
-	Number            uint64
-	ABCIClientVersion ABCIClientVersion
-	Appd              *appd.Appd
-	UntilHeight       int64
-	PreHandler        string   // Command to run before starting the app
-	StartArgs         []string // Extra arguments to pass to the app
+	Name        string
+	Number      uint64
+	ABCIVersion ABCIClientVersion
+	Appd        *appd.Appd
+	UntilHeight int64
+	PreHandler  string   // Command to run before starting the app
+	StartArgs   []string // Extra arguments to pass to the app
 }
 
 type Versions []Version
