@@ -64,7 +64,7 @@ func NewMultiplexer(
 	)
 
 	// prepare correct version
-	currentVersion, err = wrapper.getVersion(currentHeight)
+	currentVersion, err = getDesiredVersion(wrapper.lastAppVersion, wrapper.lastHeight, wrapper.versions)
 
 	if err != nil && errors.Is(err, ErrNoVersionFound) {
 		return proxy.NewLocalClientCreator(wrapper), noOpCleanUp, nil // no version found, assume latest
@@ -117,23 +117,6 @@ func NewMultiplexer(
 	return proxy.NewConnSyncLocalClientCreator(wrapper), wrapper.Cleanup, nil
 }
 
-// getVersion retrieves the appropriate application version based on either the application version or height.
-func (m *Multiplexer) getVersion(height int64) (Version, error) {
-	currentVersion, err := m.versions.GetForAppVersion(m.lastAppVersion)
-	if err == nil {
-		// there is a version for the application version
-		return currentVersion, nil
-	}
-
-	currentVersion, err = m.versions.GetForHeight(height)
-	if err == nil {
-		// there is no version for the specified application, but there is one for the specified height.
-		return currentVersion, nil
-	}
-
-	return Version{}, fmt.Errorf("no version found for either app version %d or height %d", m.lastAppVersion, height)
-}
-
 // getApp gets the appropriate app based on height and latest application version.
 func (m *Multiplexer) getApp(height int64) (servertypes.ABCI, error) {
 	m.mu.Lock()
@@ -141,7 +124,6 @@ func (m *Multiplexer) getApp(height int64) (servertypes.ABCI, error) {
 
 	// get the appropriate version for this height
 	currentVersion, err := getDesiredVersion(m.lastAppVersion, height, m.versions)
-	//currentVersion, err := m.getVersion(height)
 	if err != nil {
 		// there is no version specified for the given height or application version
 		return m.latestApp, nil
