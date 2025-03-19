@@ -12,7 +12,6 @@ import (
 	"cosmossdk.io/log"
 	"cosmossdk.io/store/rootmulti"
 	"github.com/01builders/nova/abci"
-	cmabci "github.com/cometbft/cometbft/abci/types"
 	cmtcfg "github.com/cometbft/cometbft/config"
 	"github.com/cometbft/cometbft/node"
 	"github.com/cometbft/cometbft/p2p"
@@ -411,22 +410,6 @@ func getCtx(svrCtx *server.Context, block bool) (*errgroup.Group, context.Contex
 	return g, ctx
 }
 
-// getAppVersion returns the application version to be used.
-func getAppVersion(svrCtx *server.Context, appCreator types.AppCreator) (uint64, error) {
-	app, cleanupFn, err := startApp(svrCtx, appCreator)
-	if err != nil {
-		return 0, err
-	}
-	defer cleanupFn() // we only wanted to start the app to fetch the app version. Clean it up immediately.
-
-	resp, err := app.Info(&cmabci.RequestInfo{})
-	if err != nil {
-		return 0, err
-	}
-
-	return resp.AppVersion, nil
-}
-
 func startApp(svrCtx *server.Context, appCreator types.AppCreator) (app types.Application, cleanupFn func(), err error) {
 	traceWriter, traceCleanupFn, err := setupTraceWriter(svrCtx)
 	if err != nil {
@@ -446,7 +429,6 @@ func startApp(svrCtx *server.Context, appCreator types.AppCreator) (app types.Ap
 			svrCtx.Logger.Error(localErr.Error())
 		}
 	}
-
 	return app, cleanupFn, nil
 }
 
