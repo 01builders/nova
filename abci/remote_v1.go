@@ -15,30 +15,14 @@ import (
 	versionv1 "github.com/tendermint/tendermint/proto/tendermint/version"
 )
 
-// TEMPORARY.
-// appVersionFromHeight hardcode the app version switch for celestia v1, v2, v3.
-// this avoids an extra rpc to get the app version from the app.
-// given this data is in the past and never changes, we can hardcode it.
-// only issue is that it works only with celestia mainnet.
-func appVersionFromHeight(height int64) uint64 {
-	switch {
-	// case height >= 2993219:
-	// 	return 3
-	// case height >= 2371495:
-	// 	return 2
-	// case height >= 0:
-	// 	return 1
-	default:
-		return 3
-	}
-}
-
 type RemoteABCIClientV1 struct {
 	abciv1.ABCIApplicationClient
 
 	// retainLastHeight is the height is set in finalize block
 	// and returned in commit
-	retainLastHeight int64
+	commitRetainLastHeight int64
+	// endBlockConsensusVersion is the app version got from the end block abci call
+	endBlockConsensusAppVersion uint64
 }
 
 // NewRemoteABCIClientV1 returns a new ABCI Client (using ABCI v1).
@@ -96,17 +80,27 @@ func (a *RemoteABCIClientV1) CheckTx(req *abciv2.RequestCheckTx) (*abciv2.Respon
 // Commit implements abciv2.ABCI
 func (a *RemoteABCIClientV1) Commit() (*abciv2.ResponseCommit, error) {
 	return &abciv2.ResponseCommit{
-		RetainHeight: a.retainLastHeight,
+		RetainHeight: a.commitRetainLastHeight,
 	}, nil
 }
 
 // FinalizeBlock implements abciv2.ABCI
 func (a *RemoteABCIClientV1) FinalizeBlock(req *abciv2.RequestFinalizeBlock) (*abciv2.ResponseFinalizeBlock, error) {
+	appVersion := a.endBlockConsensusAppVersion
+	if appVersion == 0 {
+		infoResp, err := a.Info(&abciv2.RequestInfo{})
+		if err != nil {
+			return nil, err
+		}
+
+		appVersion = infoResp.AppVersion
+	}
+
 	beginBlockResp, err := a.ABCIApplicationClient.BeginBlock(context.Background(), &abciv1.RequestBeginBlock{
 		Hash: req.Hash,
 		Header: typesv1.Header{
 			Version: versionv1.Consensus{
-				App: appVersionFromHeight(req.Height),
+				App: appVersion,
 			},
 			Height:             req.Height,
 			Time:               req.Time,
@@ -173,7 +167,9 @@ func (a *RemoteABCIClientV1) FinalizeBlock(req *abciv2.RequestFinalizeBlock) (*a
 	}
 
 	// set the retain height, used in commit noop
-	a.retainLastHeight = commitResp.RetainHeight
+	a.commitRetainLastHeight = commitResp.RetainHeight
+	// get the app version from the end block response
+	a.endBlockConsensusAppVersion = endBlockResp.GetConsensusParamUpdates().Version.AppVersion
 
 	return &abciv2.ResponseFinalizeBlock{
 		Events:                events,
@@ -323,9 +319,6 @@ func (a *RemoteABCIClientV1) PrepareProposal(req *abciv2.RequestPrepareProposal)
 func (a *RemoteABCIClientV1) ProcessProposal(req *abciv2.RequestProcessProposal) (*abciv2.ResponseProcessProposal, error) {
 	resp, err := a.ABCIApplicationClient.ProcessProposal(context.Background(), &abciv1.RequestProcessProposal{
 		Header: typesv1.Header{
-			Version: versionv1.Consensus{
-				App: appVersionFromHeight(req.Height),
-			},
 			Height:             req.Height,
 			Time:               req.Time,
 			NextValidatorsHash: req.NextValidatorsHash,
