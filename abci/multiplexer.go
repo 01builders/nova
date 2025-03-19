@@ -117,6 +117,7 @@ func NewMultiplexer(
 	return proxy.NewConnSyncLocalClientCreator(wrapper), wrapper.Cleanup, nil
 }
 
+// getVersion retrieves the appropriate application version based on either the application version or height.
 func (m *Multiplexer) getVersion(height int64) (Version, error) {
 	currentVersion, err := m.versions.GetForAppVersion(m.lastAppVersion)
 	if err == nil {
@@ -133,13 +134,14 @@ func (m *Multiplexer) getVersion(height int64) (Version, error) {
 	return Version{}, fmt.Errorf("no version found for either app version %d or height %d", m.lastAppVersion, height)
 }
 
-// getApp gets the appropriate app based on height
+// getApp gets the appropriate app based on height and latest application version.
 func (m *Multiplexer) getApp(height int64) (servertypes.ABCI, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
 	// get the appropriate version for this height
-	currentVersion, err := m.getVersion(height)
+	currentVersion, err := getDesiredVersion(m.lastAppVersion, height, m.versions)
+	//currentVersion, err := m.getVersion(height)
 	if err != nil {
 		// there is no version specified for the given height or application version
 		return m.latestApp, nil
@@ -364,14 +366,12 @@ func (m *Multiplexer) VerifyVoteExtension(_ context.Context, req *abci.RequestVe
 // getDesiredVersion ensures that the provided applicationVersion and height are mutually exclusive
 // and returns the correct Version from the Versions array.
 func getDesiredVersion(applicationVersion uint64, height int64, versions Versions) (Version, error) {
-	if height > 0 && applicationVersion != 0 {
-		return Version{}, fmt.Errorf("application version and height cannot be provided at the same time: %w", ErrInvalidArgument)
-	}
-
-	// If height is 0, get the Genesis version
+	// height has been specified, but application version not
+	// so we search for a version based on the provided height.
 	if height >= 0 && applicationVersion == 0 {
 		return versions.GetForHeight(height)
 	}
 
+	// we search for a version based on the specific application version.
 	return versions.GetForAppVersion(applicationVersion)
 }

@@ -32,14 +32,6 @@ func TestGetDesiredVersion(t *testing.T) {
 			expectedError:      nil,
 		},
 		{
-			name:               "both height and applicationVersion provided",
-			applicationVersion: 1,
-			height:             10,
-			versions:           Versions{{Name: "v1", AppVersion: 1, UntilHeight: 5}, {Name: "v2", AppVersion: 2, UntilHeight: 10}},
-			expectedVersion:    Version{},
-			expectedError:      ErrInvalidArgument,
-		},
-		{
 			name:               "height provided but no version found",
 			applicationVersion: 0,
 			height:             20,

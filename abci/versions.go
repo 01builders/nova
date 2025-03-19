@@ -124,6 +124,12 @@ func (v Version) GetStartArgs(args []string) []string {
 
 // Validate checks for duplicate names in a slice of Versions.
 func (v Versions) Validate() error {
+	for _, ver := range v {
+		if ver.UntilHeight > 0 && ver.AppVersion != 0 {
+			return fmt.Errorf("application version and height cannot be provided at the same time: %w", ErrInvalidArgument)
+		}
+	}
+
 	seen := make(map[string]struct{})
 	for _, v := range v {
 		if _, exists := seen[v.Name]; exists {
