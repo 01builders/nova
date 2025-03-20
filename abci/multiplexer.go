@@ -50,7 +50,7 @@ func NewMultiplexer(
 	v *viper.Viper,
 	latestApp servertypes.ABCI,
 	versions Versions,
-	currentHeight int64,
+	applicationVersion uint64,
 ) (proxy.ClientCreator, func() error, error) {
 	var noOpCleanUp = func() error {
 		return nil
@@ -61,10 +61,10 @@ func NewMultiplexer(
 	}
 
 	wrapper := &Multiplexer{
-		logger:     logger,
-		latestApp:  latestApp,
-		versions:   versions.Sorted(),
-		lastHeight: currentHeight,
+		logger:         logger,
+		latestApp:      latestApp,
+		versions:       versions.Sorted(),
+		lastAppVersion: applicationVersion,
 	}
 
 	// prepare correct version
@@ -77,7 +77,7 @@ func NewMultiplexer(
 
 	// start the correct version
 	if currentVersion.Appd == nil {
-		return nil, noOpCleanUp, fmt.Errorf("appd is nil for height %d", currentHeight)
+		return nil, noOpCleanUp, fmt.Errorf("appd is nil for version %d", applicationVersion)
 	}
 
 	if currentVersion.Appd.Pid() == appd.AppdStopped {

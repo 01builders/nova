@@ -2,6 +2,8 @@ package nova
 
 import (
 	"context"
+	"github.com/cosmos/cosmos-db"
+	"github.com/cosmos/cosmos-sdk/server"
 	"io"
 	"net"
 	"os"
@@ -10,15 +12,14 @@ import (
 	"syscall"
 
 	"cosmossdk.io/log"
-	"cosmossdk.io/store/rootmulti"
 	"github.com/01builders/nova/abci"
+	dbm "github.com/cometbft/cometbft-db"
 	cmtcfg "github.com/cometbft/cometbft/config"
 	"github.com/cometbft/cometbft/node"
 	"github.com/cometbft/cometbft/p2p"
 	pvm "github.com/cometbft/cometbft/privval"
 	"github.com/cometbft/cometbft/rpc/client/local"
 	cmttypes "github.com/cometbft/cometbft/types"
-	dbm "github.com/cosmos/cosmos-db"
 	"github.com/hashicorp/go-metrics"
 	"github.com/spf13/viper"
 	"golang.org/x/sync/errgroup"
@@ -27,7 +28,6 @@ import (
 
 	"github.com/cosmos/cosmos-sdk/client"
 	"github.com/cosmos/cosmos-sdk/codec"
-	"github.com/cosmos/cosmos-sdk/server"
 	"github.com/cosmos/cosmos-sdk/server/api"
 	serverconfig "github.com/cosmos/cosmos-sdk/server/config"
 	servergrpc "github.com/cosmos/cosmos-sdk/server/grpc"
@@ -70,18 +70,12 @@ func start(versions abci.Versions, svrCtx *server.Context, clientCtx client.Cont
 		return err
 	}
 
-	// get the current height - do this ONCE to avoid opening DB multiple times
-	height, err := getCurrentHeight(svrCtx.Config.RootDir, svrCtx.Viper)
-	if err != nil {
-		svrCtx.Logger.Info("Could not get current height, assuming genesis", "err", err)
-		height = 0
-	}
+	appVersion, err := getCurrentAppVersion(svrCtx.Config.RootDir, svrCtx.Viper, svrCtx.Config)
 
 	// Check if we should use latest app or not
-	// TODO: how to make this work with app version?
-	usesLatestApp := versions.ShouldUseLatestApp(0)
+	usesLatestApp := versions.ShouldUseLatestApp(appVersion)
 	svrCtx.Logger.Info("Determining app version to use",
-		"height", height,
+		"app_version", appVersion,
 		"usesLatestApp", usesLatestApp)
 
 	// Only start the app if we need it
@@ -119,7 +113,7 @@ func start(versions abci.Versions, svrCtx *server.Context, clientCtx client.Cont
 			svrCtx.Logger.Info("starting node with latest app")
 		}
 		tmNode, cleanupFn, err := startCmtNode(
-			versions, height, ctx, cmtCfg, app, svrCtx, usesLatestApp,
+			versions, appVersion, ctx, cmtCfg, app, svrCtx, usesLatestApp,
 		)
 		if err != nil {
 			return err
@@ -158,18 +152,25 @@ func start(versions abci.Versions, svrCtx *server.Context, clientCtx client.Cont
 	return g.Wait()
 }
 
-func getCurrentHeight(rootDir string, v *viper.Viper) (int64, error) {
-	db, err := openDB(rootDir, server.GetAppDBBackend(v))
+// getCurrentAppVersion opens the db and fetches the existing consensus version and closes the db.
+func getCurrentAppVersion(rootDir string, v *viper.Viper, cfg *cmtcfg.Config) (uint64, error) {
+	db, err := openDBM(rootDir, dbm.BackendType(server.GetAppDBBackend(v)))
+	if err != nil {
+		return 0, err
+	}
+	defer db.Close()
+
+	stateDB, _, err := node.LoadStateFromDBOrGenesisDocProvider(db, getGenDocProvider(cfg))
 	if err != nil {
 		return 0, err
 	}
 
-	return rootmulti.GetLatestVersion(db), db.Close()
+	return stateDB.Version.Consensus.App, nil
 }
 
 func startCmtNode(
 	versions abci.Versions,
-	currentHeight int64,
+	applicationVersion uint64,
 	ctx context.Context,
 	cfg *cmtcfg.Config,
 	app types.Application,
@@ -186,7 +187,7 @@ func startCmtNode(
 		svrCtx.Viper,
 		app,
 		versions,
-		currentHeight,
+		applicationVersion,
 	)
 	if err != nil {
 		return nil, cleanupFn, err
@@ -433,7 +434,12 @@ func startApp(svrCtx *server.Context, appCreator types.AppCreator) (app types.Ap
 	return app, cleanupFn, nil
 }
 
-func openDB(rootDir string, backendType dbm.BackendType) (dbm.DB, error) {
+func openDB(rootDir string, backendType db.BackendType) (db.DB, error) {
+	dataDir := filepath.Join(rootDir, "data")
+	return db.NewDB("application", backendType, dataDir)
+}
+
+func openDBM(rootDir string, backendType dbm.BackendType) (dbm.DB, error) {
 	dataDir := filepath.Join(rootDir, "data")
 	return dbm.NewDB("application", backendType, dataDir)
 }
