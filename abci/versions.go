@@ -17,7 +17,7 @@ type Version struct {
 	ABCIVersion ABCIClientVersion
 	Appd        *appd.Appd
 	UntilHeight int64
-	PreHandler  string   // Command to run before starting the app
+	PreHandlers []string // Commands to run before starting the app
 	StartArgs   []string // Extra arguments to pass to the app
 }
 
