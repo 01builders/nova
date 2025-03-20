@@ -118,51 +118,77 @@ func TestGetForHeight(t *testing.T) {
 		})
 	}
 }
-func TestShouldLatestApp(t *testing.T) {
+
+func TestShouldUseLatestApp(t *testing.T) {
 	tests := []struct {
-		name     string
-		versions Versions
-		height   int64
-		expected bool
+		name       string
+		versions   Versions
+		height     int64
+		appVersion uint64
+		expected   bool
 	}{
 		{
-			name:     "No versions available",
-			versions: Versions{},
-			height:   100,
-			expected: true,
+			name:       "No versions available",
+			versions:   Versions{},
+			height:     100,
+			appVersion: 1,
+			expected:   true,
 		},
 		{
 			name: "Height lower than all versions",
 			versions: Versions{
-				{Name: "v1", UntilHeight: 100},
-				{Name: "v2", UntilHeight: 200},
+				{Name: "v1", UntilHeight: 100, AppVersion: 1},
+				{Name: "v2", UntilHeight: 200, AppVersion: 2},
 			},
-			height:   50,
-			expected: false,
+			height:     50,
+			appVersion: 1,
+			expected:   false,
 		},
 		{
 			name: "Height matches a version",
 			versions: Versions{
-				{Name: "v1", UntilHeight: 100},
-				{Name: "v2", UntilHeight: 200},
+				{Name: "v1", UntilHeight: 100, AppVersion: 1},
+				{Name: "v2", UntilHeight: 200, AppVersion: 2},
 			},
-			height:   100,
-			expected: false,
+			height:     100,
+			appVersion: 1,
+			expected:   false,
+		},
+		{
+			name: "App version matches a version",
+			versions: Versions{
+				{Name: "v1", UntilHeight: 100, AppVersion: 1},
+				{Name: "v2", UntilHeight: 200, AppVersion: 2},
+			},
+			height:     150,
+			appVersion: 2,
+			expected:   false,
 		},
 		{
 			name: "Height exceeds all versions",
 			versions: Versions{
-				{Name: "v1", UntilHeight: 100},
-				{Name: "v2", UntilHeight: 200},
+				{Name: "v1", UntilHeight: 100, AppVersion: 1},
+				{Name: "v2", UntilHeight: 200, AppVersion: 2},
 			},
-			height:   250,
-			expected: true,
+			height:     250,
+			appVersion: 3,
+			expected:   true,
+		},
+		{
+			name: "App version does not match any version",
+			versions: Versions{
+				{Name: "v1", UntilHeight: 100, AppVersion: 1},
+				{Name: "v2", UntilHeight: 200, AppVersion: 2},
+			},
+			height:     50,
+			appVersion: 3,
+			expected:   false,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := tt.versions.ShouldLatestApp(tt.height)
+			result := tt.versions.ShouldUseLatestApp(tt.height, tt.appVersion)
 			require.Equal(t, tt.expected, result)
 		})
 	}

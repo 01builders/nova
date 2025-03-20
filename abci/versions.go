@@ -96,10 +96,13 @@ func (v Versions) GetForHeight(height int64) (Version, error) {
 	return selectedVersion, nil
 }
 
-// ShouldLatestApp returns true if the given height is higher than all version's UntilHeight.
-func (v Versions) ShouldLatestApp(height int64) bool {
+// ShouldUseLatestApp returns true if the given height is higher than all version's UntilHeight.
+func (v Versions) ShouldUseLatestApp(height int64, appVersion uint64) bool {
 	for _, version := range v {
 		if version.UntilHeight >= height {
+			return false
+		}
+		if appVersion > 0 && version.AppVersion == appVersion {
 			return false
 		}
 	}
@@ -124,18 +127,17 @@ func (v Version) GetStartArgs(args []string) []string {
 
 // Validate checks for duplicate names in a slice of Versions.
 func (v Versions) Validate() error {
+	seen := make(map[string]struct{})
 	for _, ver := range v {
+
+		if _, exists := seen[ver.Name]; exists {
+			return fmt.Errorf("version with name %s specified multiple times", ver.Name)
+		}
+		seen[ver.Name] = struct{}{}
+
 		if ver.UntilHeight > 0 && ver.AppVersion != 0 {
 			return fmt.Errorf("application version and height cannot be provided at the same time: %w", ErrInvalidArgument)
 		}
-	}
-
-	seen := make(map[string]struct{})
-	for _, v := range v {
-		if _, exists := seen[v.Name]; exists {
-			return fmt.Errorf("version with name %s specified multiple times", v.Name)
-		}
-		seen[v.Name] = struct{}{}
 	}
 	return nil
 }

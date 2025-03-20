@@ -49,7 +49,7 @@ Use a version name to specify a named version or a height to execute on the vers
 					return fmt.Errorf("version %s not found: %w", versionName, err)
 				}
 			} else if errParseHeight == nil { // Get by height
-				if versions.ShouldLatestApp(height) {
+				if versions.ShouldUseLatestApp(height, 0) {
 					return fmt.Errorf("height %d requires the latest app, use the command directly without passthrough", height)
 				}
 

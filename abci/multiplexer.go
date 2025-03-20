@@ -130,7 +130,7 @@ func (m *Multiplexer) getApp(height int64) (servertypes.ABCI, error) {
 	}
 
 	// use the latest app if the height is beyond all defined versions
-	if m.versions.ShouldLatestApp(height) {
+	if m.versions.ShouldUseLatestApp(height, m.lastAppVersion) {
 		// TODO: start the latest app here if not already started
 		return m.latestApp, nil
 	}

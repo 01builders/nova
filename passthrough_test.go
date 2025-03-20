@@ -71,11 +71,13 @@ func TestNewPassthroughCmd(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			
-			cmd, _ := NewPassthroughCmd(tt.versions)
+
+			cmd, err := NewPassthroughCmd(tt.versions)
+			require.NoError(t, err)
+
 			cmd.SetOut(&bytes.Buffer{})
 			cmd.SetErr(&bytes.Buffer{})
-			output, err := executeCommand(cmd, tt.args...)
+			output, err := executeCommand(t, cmd, tt.args...)
 
 			if tt.expectedErrStr != "" {
 				require.Error(t, err)
@@ -98,8 +100,12 @@ func newVersion(name string, untilHeight int64, app *appd.Appd) abci.Version {
 }
 
 // executeCommand executes the cobra command with the specified args.
-func executeCommand(cmd *cobra.Command, args ...string) (string, error) {
+func executeCommand(t *testing.T, cmd *cobra.Command, args ...string) (string, error) {
+	t.Helper()
 	cmd.SetArgs(args)
 	output, err := cmd.ExecuteC()
-	return output.Name(), err
+	if err != nil {
+		return "", err
+	}
+	return output.Name(), nil
 }
