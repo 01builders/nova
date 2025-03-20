@@ -9,11 +9,9 @@ import (
 
 // Version defines the configuration for remote apps.
 type Version struct {
-	Name        string
 	AppVersion  uint64
 	ABCIVersion ABCIClientVersion
 	Appd        *appd.Appd
-	UntilHeight int64
 	PreHandler  string   // Command to run before starting the app
 	StartArgs   []string // Extra arguments to pass to the app
 }
@@ -24,45 +22,16 @@ type Versions []Version
 func (v Versions) Sorted() Versions {
 	// convert map to slice
 	versionList := make([]Version, 0, len(v))
-	for _, ver := range v {
-		versionList = append(versionList, ver)
+	for i, ver := range v {
+		versionList[i] = ver
 	}
 
-	// sort by UntilHeight in ascending order
+	// sort by AppVersion in ascending order
 	sort.SliceStable(versionList, func(i, j int) bool {
-		return versionList[i].UntilHeight < versionList[j].UntilHeight
+		return versionList[i].AppVersion < versionList[j].AppVersion
 	})
 
 	return versionList
-}
-
-// GenesisVersion returns the genesis version.
-func (v Versions) GenesisVersion() (Version, error) {
-	var genesis Version
-	var minHeight int64 = -1
-
-	for _, version := range v {
-		if minHeight == -1 || version.UntilHeight < minHeight {
-			minHeight = version.UntilHeight
-			genesis = version
-		}
-	}
-
-	if minHeight == -1 {
-		return Version{}, fmt.Errorf("%w: no genesis version found", ErrNoVersionFound)
-	}
-
-	return genesis, nil
-}
-
-// GetForName returns the version for a given name.
-func (v Versions) GetForName(name string) (Version, error) {
-	for _, version := range v {
-		if version.Name == name {
-			return version, nil
-		}
-	}
-	return Version{}, fmt.Errorf("%w: %s", ErrNoVersionFound, name)
 }
 
 // GetForAppVersion returns the version for a given appVersion.
@@ -75,33 +44,9 @@ func (v Versions) GetForAppVersion(appVersion uint64) (Version, error) {
 	return Version{}, fmt.Errorf("%w: %d", ErrNoVersionFound, appVersion)
 }
 
-// GetForHeight returns the version for a given height.
-func (v Versions) GetForHeight(height int64) (Version, error) {
-	if height == 0 {
-		return v.GenesisVersion()
-	}
-
-	var selectedVersion Version
+// ShouldUseLatestApp returns true if there is no version found with the given appVersion.
+func (v Versions) ShouldUseLatestApp(appVersion uint64) bool {
 	for _, version := range v {
-		if version.UntilHeight >= height {
-			selectedVersion = version
-			break
-		}
-	}
-
-	if selectedVersion.UntilHeight < height {
-		return Version{}, fmt.Errorf("%w: %d", ErrNoVersionFound, height)
-	}
-
-	return selectedVersion, nil
-}
-
-// ShouldUseLatestApp returns true if the given height is higher than all version's UntilHeight.
-func (v Versions) ShouldUseLatestApp(height int64, appVersion uint64) bool {
-	for _, version := range v {
-		if version.UntilHeight >= height {
-			return false
-		}
 		if appVersion > 0 && version.AppVersion == appVersion {
 			return false
 		}
@@ -125,19 +70,19 @@ func (v Version) GetStartArgs(args []string) []string {
 	)
 }
 
-// Validate checks for duplicate names in a slice of Versions.
+// Validate checks for duplicate app versions in a slice of Versions.
 func (v Versions) Validate() error {
-	seen := make(map[string]struct{})
-	for _, ver := range v {
-
-		if _, exists := seen[ver.Name]; exists {
-			return fmt.Errorf("version with name %s specified multiple times", ver.Name)
-		}
-		seen[ver.Name] = struct{}{}
-
-		if ver.UntilHeight > 0 && ver.AppVersion != 0 {
-			return fmt.Errorf("application version and height cannot be provided at the same time: %w", ErrInvalidArgument)
-		}
+	if len(v) == 0 {
+		return fmt.Errorf("no versions specified")
 	}
+
+	seen := make(map[uint64]struct{})
+	for _, ver := range v {
+		if _, exists := seen[ver.AppVersion]; exists {
+			return fmt.Errorf("version %d specified multiple times", ver.AppVersion)
+		}
+		seen[ver.AppVersion] = struct{}{}
+	}
+
 	return nil
 }

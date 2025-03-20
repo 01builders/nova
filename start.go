@@ -78,7 +78,8 @@ func start(versions abci.Versions, svrCtx *server.Context, clientCtx client.Cont
 	}
 
 	// Check if we should use latest app or not
-	usesLatestApp := versions.ShouldUseLatestApp(height, 0)
+	// TODO: how to make this work with app version?
+	usesLatestApp := versions.ShouldUseLatestApp(0)
 	svrCtx.Logger.Info("Determining app version to use",
 		"height", height,
 		"usesLatestApp", usesLatestApp)
