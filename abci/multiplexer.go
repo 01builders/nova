@@ -155,8 +155,8 @@ func (m *Multiplexer) getAppForHeight(height int64) (servertypes.ABCI, error) {
 		}
 
 		if currentVersion.Appd.Pid() == appd.AppdStopped {
-			if currentVersion.PreHandler != "" {
-				preCmd := currentVersion.Appd.CreateExecCommand(currentVersion.PreHandler)
+			for _, preHandler := range currentVersion.PreHandlers {
+				preCmd := currentVersion.Appd.CreateExecCommand(preHandler)
 				if err := preCmd.Run(); err != nil {
 					m.logger.Info("Warning: PreHandler failed", "err", err)
 					// Continue anyway as the pre-handler might be optional
