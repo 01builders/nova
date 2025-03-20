@@ -22,8 +22,8 @@ type Versions []Version
 func (v Versions) Sorted() Versions {
 	// convert map to slice
 	versionList := make([]Version, 0, len(v))
-	for i, ver := range v {
-		versionList[i] = ver
+	for _, ver := range v {
+		versionList = append(versionList, ver)
 	}
 
 	// sort by AppVersion in ascending order

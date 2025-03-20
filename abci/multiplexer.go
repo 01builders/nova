@@ -24,7 +24,6 @@ type Multiplexer struct {
 	logger log.Logger
 	mu     sync.Mutex
 
-	lastHeight     int64
 	lastAppVersion uint64
 	started        bool
 
@@ -129,12 +128,6 @@ func (m *Multiplexer) getApp() (servertypes.ABCI, error) {
 	currentVersion, err := m.versions.GetForAppVersion(m.lastAppVersion)
 	if err != nil {
 		// there is no version specified for the given height or application version
-		return m.latestApp, nil
-	}
-
-	// use the latest app if the height is beyond all defined versions
-	if m.versions.ShouldUseLatestApp(m.lastAppVersion) {
-		// TODO: start the latest app here if not already started
 		return m.latestApp, nil
 	}
 
@@ -264,8 +257,7 @@ func (m *Multiplexer) FinalizeBlock(_ context.Context, req *abci.RequestFinalize
 		return nil, fmt.Errorf("failed to finalize block: %w", err)
 	}
 
-	// update the last height and app version
-	m.lastHeight = req.Height
+	// update the app version
 	m.lastAppVersion = resp.ConsensusParamUpdates.GetVersion().App
 
 	return resp, err
@@ -283,7 +275,7 @@ func (m *Multiplexer) Info(_ context.Context, req *abci.RequestInfo) (*abci.Resp
 func (m *Multiplexer) InitChain(_ context.Context, req *abci.RequestInitChain) (*abci.ResponseInitChain, error) {
 	app, err := m.getApp()
 	if err != nil {
-		return nil, fmt.Errorf("failed to get app for version %d: %w", m.lastAppVersion, err)
+		return nil, fmt.Errorf("failed to get app for genesis: %w", err)
 	}
 	return app.InitChain(req)
 }
@@ -313,7 +305,6 @@ func (m *Multiplexer) OfferSnapshot(_ context.Context, req *abci.RequestOfferSna
 }
 
 func (m *Multiplexer) PrepareProposal(_ context.Context, req *abci.RequestPrepareProposal) (*abci.ResponsePrepareProposal, error) {
-	m.lastHeight = req.Height
 	app, err := m.getApp()
 	if err != nil {
 		return nil, fmt.Errorf("failed to get app for version %d: %w", m.lastAppVersion, err)
@@ -322,7 +313,6 @@ func (m *Multiplexer) PrepareProposal(_ context.Context, req *abci.RequestPrepar
 }
 
 func (m *Multiplexer) ProcessProposal(_ context.Context, req *abci.RequestProcessProposal) (*abci.ResponseProcessProposal, error) {
-	m.lastHeight = req.Height
 	app, err := m.getApp()
 	if err != nil {
 		return nil, fmt.Errorf("failed to get app for version %d: %w", m.lastAppVersion, err)
@@ -339,7 +329,6 @@ func (m *Multiplexer) Query(ctx context.Context, req *abci.RequestQuery) (*abci.
 }
 
 func (m *Multiplexer) VerifyVoteExtension(_ context.Context, req *abci.RequestVerifyVoteExtension) (*abci.ResponseVerifyVoteExtension, error) {
-	m.lastHeight = req.Height
 	app, err := m.getApp()
 	if err != nil {
 		return nil, fmt.Errorf("failed to get app for version %d: %w", m.lastAppVersion, err)
