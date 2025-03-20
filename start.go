@@ -2,6 +2,7 @@ package nova
 
 import (
 	"context"
+	"fmt"
 	"github.com/cosmos/cosmos-db"
 	"github.com/cosmos/cosmos-sdk/server"
 	"io"
@@ -71,17 +72,15 @@ func start(versions abci.Versions, svrCtx *server.Context, clientCtx client.Cont
 	}
 
 	appVersion, err := getCurrentAppVersion(svrCtx.Logger, svrCtx.Config.RootDir, svrCtx.Viper, svrCtx.Config)
-
-	// TODO: app version defaults to 1, not 0, assume genesis for now
-	if appVersion == 1 {
-		appVersion = versions[0].AppVersion
+	if err != nil {
+		return fmt.Errorf("failed to get current app version: %w", err)
 	}
 
 	// Check if we should use latest app or not
 	usesLatestApp := versions.ShouldUseLatestApp(appVersion)
 	svrCtx.Logger.Info("Determining app version to use",
 		"app_version", appVersion,
-		"usesLatestApp", usesLatestApp)
+		"uses_latest_app", usesLatestApp)
 
 	// Only start the app if we need it
 	var app types.Application

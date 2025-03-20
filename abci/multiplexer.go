@@ -124,10 +124,14 @@ func (m *Multiplexer) getApp() (servertypes.ABCI, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
+	//if m.versions.ShouldUseLatestApp(m.lastAppVersion) {
+	//	return m.latestApp, nil
+	//}
+
 	// get the appropriate version for the latest app version.
 	currentVersion, err := m.versions.GetForAppVersion(m.lastAppVersion)
 	if err != nil {
-		// there is no version specified for the given height or application version
+		m.logger.Info("failed to get app for version, returning latest app.", "app_version", m.lastAppVersion, "err", err, "app", m.latestApp)
 		return m.latestApp, nil
 	}
 
@@ -234,6 +238,9 @@ func (m *Multiplexer) Commit(context.Context, *abci.RequestCommit) (*abci.Respon
 	app, err := m.getApp()
 	if err != nil {
 		return nil, fmt.Errorf("failed to get app for version %d: %w", m.lastAppVersion, err)
+	}
+	if app == nil {
+		panic("APP IS NIL")
 	}
 	return app.Commit()
 }
