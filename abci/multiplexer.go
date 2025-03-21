@@ -239,9 +239,6 @@ func (m *Multiplexer) Commit(context.Context, *abci.RequestCommit) (*abci.Respon
 	if err != nil {
 		return nil, fmt.Errorf("failed to get app for version %d: %w", m.lastAppVersion, err)
 	}
-	if app == nil {
-		panic("APP IS NIL")
-	}
 	return app.Commit()
 }
 
