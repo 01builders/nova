@@ -341,7 +341,7 @@ func (a *RemoteABCIClientV1) ProcessProposal(req *abciv2.RequestProcessProposal)
 			Version: versionv1.Consensus{
 				App: appVersion,
 			},
-			ChainID:            "local_devnet",
+			ChainID:            a.chainID,
 			Height:             req.Height,
 			Time:               req.Time,
 			NextValidatorsHash: req.NextValidatorsHash,
