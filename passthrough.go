@@ -38,15 +38,11 @@ This allows interacting with older app versions for debugging or older queries.`
 				return fmt.Errorf("failed to parse version: %w", err)
 			}
 
-			var (
-				appVersion abci.Version
-			)
-
 			if versions.ShouldUseLatestApp(version) {
 				return fmt.Errorf("version %d requires the latest app, use the command directly without passthrough", version)
 			}
 
-			appVersion, err = versions.GetForAppVersion(version)
+			appVersion, err := versions.GetForAppVersion(version)
 			if err != nil {
 				return fmt.Errorf("no version found for %d: %w", version, err)
 			}
