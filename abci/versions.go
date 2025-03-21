@@ -12,14 +12,13 @@ type Version struct {
 	AppVersion  uint64
 	ABCIVersion ABCIClientVersion
 	Appd        *appd.Appd
-	UntilHeight int64
 	PreHandlers []string // Commands to run before starting the app
 	StartArgs   []string // Extra arguments to pass to the app
 }
 
 type Versions []Version
 
-// Sorted returns a sorted slice of Versions, sorted by UntilHeight (ascending).
+// Sorted returns a sorted slice of Versions, sorted by AppVersion (ascending).
 func (v Versions) Sorted() Versions {
 	// convert map to slice
 	versionList := make([]Version, 0)
