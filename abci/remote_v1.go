@@ -23,13 +23,16 @@ type RemoteABCIClientV1 struct {
 	commitRetainLastHeight int64
 	// endBlockConsensusVersion is the app version got from the end block abci call
 	endBlockConsensusAppVersion uint64
+	// chainID is required to pass into the headers.
+	chainID string
 }
 
 // NewRemoteABCIClientV1 returns a new ABCI Client (using ABCI v1).
 // The client behaves like Tendermint for the server side (the application side).
-func NewRemoteABCIClientV1(conn *grpc.ClientConn) *RemoteABCIClientV1 {
+func NewRemoteABCIClientV1(conn *grpc.ClientConn, chainID string) *RemoteABCIClientV1 {
 	return &RemoteABCIClientV1{
 		ABCIApplicationClient: abciv1.NewABCIApplicationClient(conn),
+		chainID:               chainID,
 	}
 }
 
@@ -99,7 +102,7 @@ func (a *RemoteABCIClientV1) FinalizeBlock(req *abciv2.RequestFinalizeBlock) (*a
 	beginBlockResp, err := a.ABCIApplicationClient.BeginBlock(context.Background(), &abciv1.RequestBeginBlock{
 		Hash: req.Hash,
 		Header: typesv1.Header{
-			ChainID: "local_devnet",
+			ChainID: a.chainID,
 			Version: versionv1.Consensus{
 				App: appVersion,
 			},
@@ -302,7 +305,7 @@ func (a *RemoteABCIClientV1) OfferSnapshot(req *abciv2.RequestOfferSnapshot) (*a
 // PrepareProposal implements abciv2.ABCI
 func (a *RemoteABCIClientV1) PrepareProposal(req *abciv2.RequestPrepareProposal) (*abciv2.ResponsePrepareProposal, error) {
 	resp, err := a.ABCIApplicationClient.PrepareProposal(context.Background(), &abciv1.RequestPrepareProposal{
-		ChainId: "local_devnet",
+		ChainId: a.chainID,
 		BlockData: &typesv1.Data{
 			Txs: req.Txs,
 		},
@@ -330,7 +333,6 @@ func (a *RemoteABCIClientV1) ProcessProposal(req *abciv2.RequestProcessProposal)
 		if err != nil {
 			return nil, err
 		}
-
 		appVersion = infoResp.AppVersion
 	}
 
