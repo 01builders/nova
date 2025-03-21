@@ -112,7 +112,10 @@ func NewMultiplexer(
 	conn, err := grpc.NewClient(
 		tmAddress,
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
-		grpc.WithDefaultCallOptions(grpc.MaxCallSendMsgSize(math.MaxInt), grpc.MaxCallRecvMsgSize(math.MaxInt)),
+		grpc.WithDefaultCallOptions(
+			grpc.MaxCallSendMsgSize(math.MaxInt),
+			grpc.MaxCallRecvMsgSize(math.MaxInt),
+		),
 	)
 	if err != nil {
 		return nil, noOpCleanUp, fmt.Errorf("failed to prepare app connection: %w", err)
