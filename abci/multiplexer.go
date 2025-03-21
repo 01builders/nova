@@ -124,14 +124,11 @@ func (m *Multiplexer) getApp() (servertypes.ABCI, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	//if m.versions.ShouldUseLatestApp(m.lastAppVersion) {
-	//	return m.latestApp, nil
-	//}
-
 	// get the appropriate version for the latest app version.
 	currentVersion, err := m.versions.GetForAppVersion(m.lastAppVersion)
 	if err != nil {
-		m.logger.Info("failed to get app for version, returning latest app.", "app_version", m.lastAppVersion, "err", err, "app", m.latestApp)
+		m.logger.Info("failed to get embedded app for version, returning latest app.", "app_version", m.lastAppVersion, "err", err, "app", m.latestApp)
+		panic("TOOD: start latest app here")
 		return m.latestApp, nil
 	}
 

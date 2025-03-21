@@ -35,12 +35,24 @@ func (v Versions) Sorted() Versions {
 }
 
 // GetForAppVersion returns the version for a given appVersion.
+// if the app version specified is lower than the minimum app version, return the lowest version.
 func (v Versions) GetForAppVersion(appVersion uint64) (Version, error) {
+	var lowestVersion Version
 	for _, version := range v {
+		if lowestVersion.AppVersion == 0 || version.AppVersion < lowestVersion.AppVersion {
+			lowestVersion = version
+		}
 		if version.AppVersion == appVersion {
 			return version, nil
 		}
 	}
+
+	// return the lowest version found, it is not the specified version, but it
+	// is the earliest version in the versions array.
+	if lowestVersion.AppVersion > 0 {
+		return lowestVersion, nil
+	}
+
 	return Version{}, fmt.Errorf("%w: %d", ErrNoVersionFound, appVersion)
 }
 

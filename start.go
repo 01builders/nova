@@ -164,11 +164,14 @@ func getCurrentAppVersion(logger log.Logger, rootDir string, v *viper.Viper, cfg
 	}
 	defer db.Close()
 
+	logger.Info("loading genesis doc from", "path", cfg.GenesisFile())
+
 	stateDB, _, err := node.LoadStateFromDBOrGenesisDocProvider(db, getGenDocProvider(cfg))
 	if err != nil {
 		return 0, err
 	}
 
+	logger.Info("Entire State", "state", stateDB)
 	logger.Info("Current version", "state_version", stateDB.Version)
 
 	return stateDB.Version.Consensus.App, nil
