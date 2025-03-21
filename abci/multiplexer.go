@@ -62,7 +62,7 @@ func NewMultiplexer(
 	wrapper := &Multiplexer{
 		logger:         logger,
 		latestApp:      latestApp,
-		versions:       versions.Sorted(),
+		versions:       versions,
 		lastAppVersion: applicationVersion,
 	}
 
@@ -164,6 +164,7 @@ func (m *Multiplexer) getApp() (servertypes.ABCI, error) {
 				programArgs = os.Args[2:] // Remove 'appd start' args
 			}
 
+			m.logger.Info("starting app for version", "app_version", currentVersion.AppVersion, "args", programArgs)
 			if err := currentVersion.Appd.Start(currentVersion.GetStartArgs(programArgs)...); err != nil {
 				return nil, fmt.Errorf("failed to start app for version %d: %w", m.lastAppVersion, err)
 			}
@@ -177,7 +178,7 @@ func (m *Multiplexer) getApp() (servertypes.ABCI, error) {
 		}
 	}
 
-	m.logger.Debug("creating ABCI remote connection", "app_version", currentVersion.ABCIVersion, "abci_version", currentVersion.ABCIVersion)
+	m.logger.Info("creating ABCI remote connection", "app_version", currentVersion.AppVersion, "abci_version", currentVersion.ABCIVersion.String())
 
 	switch currentVersion.ABCIVersion {
 	case ABCIClientVersion1:
