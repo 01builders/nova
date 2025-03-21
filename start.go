@@ -3,6 +3,7 @@ package nova
 import (
 	"context"
 	"fmt"
+	"github.com/cometbft/cometbft/state"
 	"io"
 	"net"
 	"os"
@@ -71,15 +72,18 @@ func start(versions abci.Versions, svrCtx *server.Context, clientCtx client.Cont
 		return err
 	}
 
-	appVersion, err := getCurrentAppVersion(svrCtx.Config.RootDir, svrCtx.Viper, svrCtx.Config)
+	state, err := getState(svrCtx.Config.RootDir, svrCtx.Viper, svrCtx.Config)
 	if err != nil {
-		return fmt.Errorf("failed to get current app version: %w", err)
+		return fmt.Errorf("failed to get current app state: %w", err)
 	}
+
+	appVersion := state.Version.Consensus.App
 
 	// Check if we should use latest app or not
 	usesLatestApp := versions.ShouldUseLatestApp(appVersion)
-	svrCtx.Logger.Info("Determining app version to use",
+	svrCtx.Logger.Info("determining app version to use",
 		"app_version", appVersion,
+		"chain_id", state.ChainID,
 		"uses_latest_app", usesLatestApp)
 
 	// Only start the app if we need it
@@ -117,7 +121,7 @@ func start(versions abci.Versions, svrCtx *server.Context, clientCtx client.Cont
 			svrCtx.Logger.Info("starting node with latest app")
 		}
 		tmNode, cleanupFn, err := startCmtNode(
-			versions, appVersion, ctx, cmtCfg, app, svrCtx, usesLatestApp,
+			versions, state.ChainID, appVersion, ctx, cmtCfg, app, svrCtx, usesLatestApp,
 		)
 		if err != nil {
 			return err
@@ -156,24 +160,25 @@ func start(versions abci.Versions, svrCtx *server.Context, clientCtx client.Cont
 	return g.Wait()
 }
 
-// getCurrentAppVersion opens the db and fetches the existing consensus version and closes the db.
-func getCurrentAppVersion(rootDir string, v *viper.Viper, cfg *cmtcfg.Config) (uint64, error) {
+// getState opens the db and fetches the existing state.
+func getState(rootDir string, v *viper.Viper, cfg *cmtcfg.Config) (state.State, error) {
 	db, err := openDBM(rootDir, dbm.BackendType(server.GetAppDBBackend(v)))
 	if err != nil {
-		return 0, err
+		return state.State{}, err
 	}
 	defer db.Close()
 
-	stateDB, _, err := node.LoadStateFromDBOrGenesisDocProvider(db, getGenDocProvider(cfg))
+	s, _, err := node.LoadStateFromDBOrGenesisDocProvider(db, getGenDocProvider(cfg))
 	if err != nil {
-		return 0, err
+		return state.State{}, err
 	}
 
-	return stateDB.Version.Consensus.App, nil
+	return s, nil
 }
 
 func startCmtNode(
 	versions abci.Versions,
+	chainID string,
 	applicationVersion uint64,
 	ctx context.Context,
 	cfg *cmtcfg.Config,
@@ -191,6 +196,7 @@ func startCmtNode(
 		svrCtx.Viper,
 		app,
 		versions,
+		chainID,
 		applicationVersion,
 	)
 	if err != nil {

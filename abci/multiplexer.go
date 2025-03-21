@@ -30,6 +30,7 @@ type Multiplexer struct {
 
 	latestApp     servertypes.ABCI
 	activeVersion Version
+	chainID       string
 
 	versions Versions
 	conn     *grpc.ClientConn
@@ -50,6 +51,7 @@ func NewMultiplexer(
 	v *viper.Viper,
 	latestApp servertypes.ABCI,
 	versions Versions,
+	chainID string,
 	applicationVersion uint64,
 ) (proxy.ClientCreator, func() error, error) {
 	var noOpCleanUp = func() error {
@@ -64,6 +66,7 @@ func NewMultiplexer(
 		logger:         logger,
 		latestApp:      latestApp,
 		versions:       versions,
+		chainID:        chainID,
 		lastAppVersion: applicationVersion,
 	}
 
@@ -183,11 +186,11 @@ func (m *Multiplexer) getApp() (servertypes.ABCI, error) {
 		}
 	}
 
-	m.logger.Info("Using ABCI remote connection", "maximum_app_version", currentVersion.AppVersion, "abci_version", currentVersion.ABCIVersion.String())
+	m.logger.Info("Using ABCI remote connection", "maximum_app_version", currentVersion.AppVersion, "abci_version", currentVersion.ABCIVersion.String(), "chain_id", m.chainID)
 
 	switch currentVersion.ABCIVersion {
 	case ABCIClientVersion1:
-		return NewRemoteABCIClientV1(m.conn), nil
+		return NewRemoteABCIClientV1(m.conn, m.chainID), nil
 	case ABCIClientVersion2:
 		return NewRemoteABCIClientV2(m.conn), nil
 	}
