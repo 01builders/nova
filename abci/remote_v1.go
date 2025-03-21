@@ -99,6 +99,7 @@ func (a *RemoteABCIClientV1) FinalizeBlock(req *abciv2.RequestFinalizeBlock) (*a
 	beginBlockResp, err := a.ABCIApplicationClient.BeginBlock(context.Background(), &abciv1.RequestBeginBlock{
 		Hash: req.Hash,
 		Header: typesv1.Header{
+			ChainID: "local_devnet",
 			Version: versionv1.Consensus{
 				App: appVersion,
 			},
@@ -324,6 +325,7 @@ func (a *RemoteABCIClientV1) PrepareProposal(req *abciv2.RequestPrepareProposal)
 func (a *RemoteABCIClientV1) ProcessProposal(req *abciv2.RequestProcessProposal) (*abciv2.ResponseProcessProposal, error) {
 	resp, err := a.ABCIApplicationClient.ProcessProposal(context.Background(), &abciv1.RequestProcessProposal{
 		Header: typesv1.Header{
+			ChainID:            "local_devnet",
 			Height:             req.Height,
 			Time:               req.Time,
 			NextValidatorsHash: req.NextValidatorsHash,
