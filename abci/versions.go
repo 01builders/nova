@@ -79,6 +79,7 @@ func (v Version) GetStartArgs(args []string) []string {
 		"--api.swagger=false",
 		"--with-tendermint=false",
 		"--transport=grpc",
+		"--v2-upgrade-height=5", // TODO: remove
 	)
 }
 
