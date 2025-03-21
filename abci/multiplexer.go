@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"os"
 	"strings"
 	"sync"
@@ -108,9 +109,13 @@ func NewMultiplexer(
 	// remove tcp:// prefix if present
 	tmAddress = strings.TrimPrefix(tmAddress, "tcp://")
 
-	conn, err := grpc.Dial( //nolint:staticcheck: we want to check the connection.
+	conn, err := grpc.NewClient(
 		tmAddress,
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		grpc.WithDefaultCallOptions(
+			grpc.MaxCallSendMsgSize(math.MaxInt),
+			grpc.MaxCallRecvMsgSize(math.MaxInt),
+		),
 	)
 	if err != nil {
 		return nil, noOpCleanUp, fmt.Errorf("failed to prepare app connection: %w", err)
