@@ -3,13 +3,14 @@ package nova
 import (
 	"context"
 	"fmt"
-	"github.com/cometbft/cometbft/state"
 	"io"
 	"net"
 	"os"
 	"os/signal"
 	"path/filepath"
 	"syscall"
+
+	"github.com/cometbft/cometbft/state"
 
 	"cosmossdk.io/log"
 	"github.com/01builders/nova/abci"
@@ -22,7 +23,6 @@ import (
 	cmttypes "github.com/cometbft/cometbft/types"
 	db "github.com/cosmos/cosmos-db"
 	"github.com/hashicorp/go-metrics"
-	"github.com/spf13/viper"
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
@@ -72,7 +72,7 @@ func start(versions abci.Versions, svrCtx *server.Context, clientCtx client.Cont
 		return err
 	}
 
-	state, err := getState(svrCtx.Config.RootDir, svrCtx.Viper, svrCtx.Config)
+	state, err := getState(svrCtx.Config)
 	if err != nil {
 		return fmt.Errorf("failed to get current app state: %w", err)
 	}
@@ -161,8 +161,8 @@ func start(versions abci.Versions, svrCtx *server.Context, clientCtx client.Cont
 }
 
 // getState opens the db and fetches the existing state.
-func getState(rootDir string, v *viper.Viper, cfg *cmtcfg.Config) (state.State, error) {
-	db, err := openDBM(rootDir, dbm.BackendType(server.GetAppDBBackend(v)))
+func getState(cfg *cmtcfg.Config) (state.State, error) {
+	db, err := openDBM(cfg)
 	if err != nil {
 		return state.State{}, err
 	}
@@ -449,9 +449,8 @@ func openDB(rootDir string, backendType db.BackendType) (db.DB, error) {
 	return db.NewDB("application", backendType, dataDir)
 }
 
-func openDBM(rootDir string, backendType dbm.BackendType) (dbm.DB, error) {
-	dataDir := filepath.Join(rootDir, "data")
-	return dbm.NewDB("application", backendType, dataDir)
+func openDBM(cfg *cmtcfg.Config) (dbm.DB, error) {
+	return dbm.NewDB("state", dbm.BackendType(cfg.DBBackend), cfg.DBDir())
 }
 
 func openTraceWriter(traceWriterFile string) (w io.WriteCloser, err error) {
