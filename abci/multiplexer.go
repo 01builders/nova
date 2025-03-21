@@ -132,7 +132,7 @@ func (m *Multiplexer) getApp() (servertypes.ABCI, error) {
 	// get the appropriate version for the latest app version.
 	currentVersion, err := m.versions.GetForAppVersion(m.lastAppVersion)
 	if err != nil {
-		m.logger.Info("no app found in multiplexer for app version; using latest app", "app_version", m.lastAppVersion, "err", err)
+		m.logger.Info("No app found in multiplexer for app version; using latest app", "app_version", m.lastAppVersion, "err", err)
 		panic("TOOD: start latest app here")
 		return m.latestApp, nil
 	}
@@ -146,7 +146,7 @@ func (m *Multiplexer) getApp() (servertypes.ABCI, error) {
 		// check if an app is already started
 		// stop the app if it's running
 		if m.activeVersion.Appd != nil && m.activeVersion.Appd.Pid() != appd.AppdStopped {
-			m.logger.Info("Stopping app for version", "app_version", m.activeVersion.AppVersion)
+			m.logger.Info("Stopping app for version", "maximum_app_version", m.activeVersion.AppVersion)
 			if err := m.activeVersion.Appd.Stop(); err != nil {
 				return nil, fmt.Errorf("failed to stop app for version %d: %w", m.activeVersion.AppVersion, err)
 			}
@@ -169,7 +169,7 @@ func (m *Multiplexer) getApp() (servertypes.ABCI, error) {
 				programArgs = os.Args[2:] // Remove 'appd start' args
 			}
 
-			m.logger.Info("starting app for version", "app_version", currentVersion.AppVersion, "args", programArgs)
+			m.logger.Info("Starting app for version", "app_version", currentVersion.AppVersion, "args", programArgs)
 			if err := currentVersion.Appd.Start(currentVersion.GetStartArgs(programArgs)...); err != nil {
 				return nil, fmt.Errorf("failed to start app for version %d: %w", m.lastAppVersion, err)
 			}
@@ -183,7 +183,7 @@ func (m *Multiplexer) getApp() (servertypes.ABCI, error) {
 		}
 	}
 
-	m.logger.Info("creating ABCI remote connection", "app_version", currentVersion.AppVersion, "abci_version", currentVersion.ABCIVersion.String())
+	m.logger.Info("Using ABCI remote connection", "maximum_app_version", currentVersion.AppVersion, "abci_version", currentVersion.ABCIVersion.String())
 
 	switch currentVersion.ABCIVersion {
 	case ABCIClientVersion1:
@@ -204,7 +204,7 @@ func (m *Multiplexer) Cleanup() error {
 
 	// stop any running app
 	if m.activeVersion.Appd != nil && m.activeVersion.Appd.Pid() != appd.AppdStopped {
-		m.logger.Info("Stopping app for version", "app_version", m.activeVersion.AppVersion)
+		m.logger.Info("Stopping app for version", "maximum_app_version", m.activeVersion.AppVersion)
 		if err := m.activeVersion.Appd.Stop(); err != nil {
 			errs = errors.Join(errs, fmt.Errorf("failed to stop app for version %d: %w", m.activeVersion.AppVersion, err))
 		}
