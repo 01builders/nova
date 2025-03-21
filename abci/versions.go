@@ -37,33 +37,33 @@ func (v Versions) Sorted() Versions {
 // GetForAppVersion returns the version for a given appVersion.
 // if the app version specified is lower than the minimum app version, return the lowest version.
 func (v Versions) GetForAppVersion(appVersion uint64) (Version, error) {
-	var lowestVersion Version
+	if len(v) == 0 {
+		return Version{}, fmt.Errorf("%w: %d", ErrNoVersionFound, appVersion)
+	}
+
+	lowestVersion := v[0]
+	highestVersion := v[len(v)-1]
+
+	// the version being specified is higher than any version we have, we assume this is the latest version.
+	if appVersion > highestVersion.AppVersion {
+		return Version{}, fmt.Errorf("%w: %d", ErrNoVersionFound, appVersion)
+	}
+
 	for _, version := range v {
-		if lowestVersion.AppVersion == 0 || version.AppVersion < lowestVersion.AppVersion {
-			lowestVersion = version
-		}
 		if version.AppVersion == appVersion {
 			return version, nil
 		}
 	}
 
-	// return the lowest version found, it is not the specified version, but it
-	// is the earliest version in the versions array.
-	if lowestVersion.AppVersion > 0 {
-		return lowestVersion, nil
-	}
-
-	return Version{}, fmt.Errorf("%w: %d", ErrNoVersionFound, appVersion)
+	// return the lowest version if the exact version is not found.
+	return lowestVersion, nil
 }
 
 // ShouldUseLatestApp returns true if there is no version found with the given appVersion.
 func (v Versions) ShouldUseLatestApp(appVersion uint64) bool {
-	for _, version := range v {
-		if appVersion > 0 && version.AppVersion == appVersion {
-			return false
-		}
-	}
-	return true
+	// should only use the latest app if there are no versions to use based on desired version.
+	_, err := v.GetForAppVersion(appVersion)
+	return err != nil
 }
 
 // GetStartArgs returns the appropriate args.

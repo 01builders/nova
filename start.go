@@ -71,7 +71,7 @@ func start(versions abci.Versions, svrCtx *server.Context, clientCtx client.Cont
 		return err
 	}
 
-	appVersion, err := getCurrentAppVersion(svrCtx.Logger, svrCtx.Config.RootDir, svrCtx.Viper, svrCtx.Config)
+	appVersion, err := getCurrentAppVersion(svrCtx.Config.RootDir, svrCtx.Viper, svrCtx.Config)
 	if err != nil {
 		return fmt.Errorf("failed to get current app version: %w", err)
 	}
@@ -157,22 +157,17 @@ func start(versions abci.Versions, svrCtx *server.Context, clientCtx client.Cont
 }
 
 // getCurrentAppVersion opens the db and fetches the existing consensus version and closes the db.
-func getCurrentAppVersion(logger log.Logger, rootDir string, v *viper.Viper, cfg *cmtcfg.Config) (uint64, error) {
+func getCurrentAppVersion(rootDir string, v *viper.Viper, cfg *cmtcfg.Config) (uint64, error) {
 	db, err := openDBM(rootDir, dbm.BackendType(server.GetAppDBBackend(v)))
 	if err != nil {
 		return 0, err
 	}
 	defer db.Close()
 
-	logger.Info("loading genesis doc from", "path", cfg.GenesisFile())
-
 	stateDB, _, err := node.LoadStateFromDBOrGenesisDocProvider(db, getGenDocProvider(cfg))
 	if err != nil {
 		return 0, err
 	}
-
-	logger.Info("Entire State", "state", stateDB)
-	logger.Info("Current version", "state_version", stateDB.Version)
 
 	return stateDB.Version.Consensus.App, nil
 }

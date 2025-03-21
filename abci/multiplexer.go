@@ -177,6 +177,8 @@ func (m *Multiplexer) getApp() (servertypes.ABCI, error) {
 		}
 	}
 
+	m.logger.Debug("creating ABCI remote connection", "app_version", currentVersion.ABCIVersion, "abci_version", currentVersion.ABCIVersion)
+
 	switch currentVersion.ABCIVersion {
 	case ABCIClientVersion1:
 		return NewRemoteABCIClientV1(m.conn), nil
