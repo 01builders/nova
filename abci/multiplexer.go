@@ -73,7 +73,8 @@ func NewMultiplexer(
 	// prepare correct version
 	currentVersion, err := versions.GetForAppVersion(wrapper.lastAppVersion)
 	if err != nil && errors.Is(err, ErrNoVersionFound) {
-		return proxy.NewLocalClientCreator(wrapper), noOpCleanUp, nil // no version found, assume latest
+		// no version found, assume latest
+		return proxy.NewConnSyncLocalClientCreator(wrapper), noOpCleanUp, nil
 	} else if err != nil {
 		return nil, noOpCleanUp, fmt.Errorf("failed to get app for version %d: %w", wrapper.lastAppVersion, err)
 	}
