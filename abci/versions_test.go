@@ -2,173 +2,125 @@ package abci
 
 import (
 	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 )
 
-func TestGenesisVersion(t *testing.T) {
+func TestGetForAppVersion(t *testing.T) {
 	tests := []struct {
 		name        string
 		versions    Versions
+		appVersion  uint64
+		expected    Version
 		expectedErr error
-		expectedVer Version
 	}{
 		{
-			name:        "No versions available",
+			name: "exact match",
+			versions: Versions{
+				{AppVersion: 1},
+				{AppVersion: 2},
+				{AppVersion: 3},
+			},
+			appVersion:  2,
+			expected:    Version{AppVersion: 2},
+			expectedErr: nil,
+		},
+		{
+			name: "no matching version returns smallest available version",
+			versions: Versions{
+				{AppVersion: 2},
+				{AppVersion: 3},
+			},
+			appVersion:  1,
+			expected:    Version{AppVersion: 2},
+			expectedErr: nil,
+		},
+		{
+			name:        "empty versions list returns error",
 			versions:    Versions{},
-			expectedErr: ErrNoVersionFound,
+			appVersion:  1,
+			expected:    Version{},
+			expectedErr: fmt.Errorf("%w: %d", ErrNoVersionFound, 1),
 		},
 		{
-			name: "Single genesis version",
+			name: "app version matches the lowest version",
 			versions: Versions{
-				{Name: "v1", UntilHeight: 100},
+				{AppVersion: 1},
+				{AppVersion: 3},
 			},
-			expectedVer: Version{Name: "v1", UntilHeight: 100},
+			appVersion:  1,
+			expected:    Version{AppVersion: 1},
+			expectedErr: nil,
 		},
 		{
-			name: "Find lowest UntilHeight",
+			name: "app version not in list, returns lowest",
 			versions: Versions{
-				{Name: "v1", UntilHeight: 100},
-				{Name: "v2", UntilHeight: 50}, // Genesis version
-				{Name: "v3", UntilHeight: 150},
+				{AppVersion: 4},
+				{AppVersion: 5},
+				{AppVersion: 6},
 			},
-			expectedVer: Version{Name: "v2", UntilHeight: 50},
+			appVersion:  2,
+			expected:    Version{AppVersion: 4},
+			expectedErr: nil,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			version, err := tt.versions.GenesisVersion()
+			actual, err := tt.versions.GetForAppVersion(tt.appVersion)
 
 			if tt.expectedErr != nil {
 				require.Error(t, err)
-				require.ErrorIs(t, err, tt.expectedErr)
+				require.EqualError(t, tt.expectedErr, err.Error(), "unexpected error message")
 			} else {
 				require.NoError(t, err)
-				require.Equal(t, tt.expectedVer, version)
+				require.Equal(t, tt.expected, actual, "unexpected result")
 			}
 		})
 	}
 }
-func TestGetForHeight(t *testing.T) {
+
+func TestShouldUseLatestApp(t *testing.T) {
 	tests := []struct {
-		name        string
-		versions    Versions
-		height      int64
-		expectedErr error
-		expectedVer Version
+		name       string
+		versions   Versions
+		appVersion uint64
+		expected   bool
 	}{
+		{"No versions available", Versions{}, 1, true},
 		{
-			name:        "No versions available",
-			versions:    Versions{},
-			height:      100,
-			expectedErr: ErrNoVersionFound,
+			"App version matches the first version",
+			Versions{
+				{AppVersion: 1},
+				{AppVersion: 2},
+			}, 1, false,
 		},
 		{
-			name: "Exact match for height",
-			versions: Versions{
-				{Name: "v1", UntilHeight: 100},
-			},
-			height:      100,
-			expectedVer: Version{Name: "v1", UntilHeight: 100},
+			"App version matches a later version",
+			Versions{
+				{AppVersion: 1},
+				{AppVersion: 2},
+			}, 2, false,
 		},
 		{
-			name: "Find closest matching version",
-			versions: Versions{
-				{Name: "v1", UntilHeight: 50},
-				{Name: "v2", UntilHeight: 100},
-				{Name: "v3", UntilHeight: 200},
-			},
-			height:      75,
-			expectedVer: Version{Name: "v2", UntilHeight: 100}, // Closest greater match
-		},
-		{
-			name: "Find closest matching version using sorting",
-			versions: Versions{
-				{Name: "v1", UntilHeight: 50},
-				{Name: "v3", UntilHeight: 200},
-				{Name: "v2", UntilHeight: 100},
-			}.Sorted(),
-			height:      75,
-			expectedVer: Version{Name: "v2", UntilHeight: 100}, // Closest greater match
-		},
-		{
-			name: "No matching version for height",
-			versions: Versions{
-				{Name: "v1", UntilHeight: 50},
-				{Name: "v2", UntilHeight: 100},
-			},
-			height:      150,
-			expectedErr: ErrNoVersionFound,
+			"App version does not match any version",
+			Versions{
+				{AppVersion: 1},
+				{AppVersion: 2},
+			}, 3, true,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			version, err := tt.versions.GetForHeight(tt.height)
-
-			if tt.expectedErr != nil {
-				require.Error(t, err)
-				require.ErrorIs(t, err, tt.expectedErr)
-			} else {
-				require.NoError(t, err)
-				require.Equal(t, tt.expectedVer, version)
-			}
-		})
-	}
-}
-func TestShouldLatestApp(t *testing.T) {
-	tests := []struct {
-		name     string
-		versions Versions
-		height   int64
-		expected bool
-	}{
-		{
-			name:     "No versions available",
-			versions: Versions{},
-			height:   100,
-			expected: true,
-		},
-		{
-			name: "Height lower than all versions",
-			versions: Versions{
-				{Name: "v1", UntilHeight: 100},
-				{Name: "v2", UntilHeight: 200},
-			},
-			height:   50,
-			expected: false,
-		},
-		{
-			name: "Height matches a version",
-			versions: Versions{
-				{Name: "v1", UntilHeight: 100},
-				{Name: "v2", UntilHeight: 200},
-			},
-			height:   100,
-			expected: false,
-		},
-		{
-			name: "Height exceeds all versions",
-			versions: Versions{
-				{Name: "v1", UntilHeight: 100},
-				{Name: "v2", UntilHeight: 200},
-			},
-			height:   250,
-			expected: true,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := tt.versions.ShouldLatestApp(tt.height)
-			require.Equal(t, tt.expected, result)
+			require.Equal(t, tt.expected, tt.versions.ShouldUseLatestApp(tt.appVersion))
 		})
 	}
 }
 
-func TestEnsureUniqueNames(t *testing.T) {
+func TestEnsureUniqueVersions(t *testing.T) {
 	tests := []struct {
 		name        string
 		versions    Versions
@@ -176,28 +128,28 @@ func TestEnsureUniqueNames(t *testing.T) {
 	}{
 		{
 			name:        "no duplicates",
-			versions:    []Version{{Name: "v1"}, {Name: "v2"}, {Name: "v3"}},
+			versions:    []Version{{AppVersion: 1}, {AppVersion: 2}, {AppVersion: 3}},
 			expectedErr: nil,
 		},
 		{
-			name:        "duplicate names",
-			versions:    []Version{{Name: "v1"}, {Name: "v2"}, {Name: "v1"}},
-			expectedErr: errors.New("version with name v1 specified multiple times"),
+			name:        "duplicate app versions",
+			versions:    []Version{{AppVersion: 1}, {AppVersion: 2}, {AppVersion: 1}},
+			expectedErr: errors.New("version 1 specified multiple times"),
 		},
 		{
 			name:        "empty list",
 			versions:    []Version{},
-			expectedErr: nil,
+			expectedErr: errors.New("no versions specified"),
 		},
 		{
 			name:        "single element",
-			versions:    []Version{{Name: "v1"}},
+			versions:    []Version{{AppVersion: 1}},
 			expectedErr: nil,
 		},
 		{
 			name:        "multiple duplicates",
-			versions:    []Version{{Name: "v1"}, {Name: "v2"}, {Name: "v1"}, {Name: "v3"}, {Name: "v2"}},
-			expectedErr: errors.New("version with name v1 specified multiple times"),
+			versions:    []Version{{AppVersion: 1}, {AppVersion: 2}, {AppVersion: 1}, {AppVersion: 3}, {AppVersion: 2}},
+			expectedErr: errors.New("version 1 specified multiple times"),
 		},
 	}
 

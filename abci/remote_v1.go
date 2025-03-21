@@ -99,6 +99,7 @@ func (a *RemoteABCIClientV1) FinalizeBlock(req *abciv2.RequestFinalizeBlock) (*a
 	beginBlockResp, err := a.ABCIApplicationClient.BeginBlock(context.Background(), &abciv1.RequestBeginBlock{
 		Hash: req.Hash,
 		Header: typesv1.Header{
+			ChainID: "local_devnet",
 			Version: versionv1.Consensus{
 				App: appVersion,
 			},
@@ -301,6 +302,7 @@ func (a *RemoteABCIClientV1) OfferSnapshot(req *abciv2.RequestOfferSnapshot) (*a
 // PrepareProposal implements abciv2.ABCI
 func (a *RemoteABCIClientV1) PrepareProposal(req *abciv2.RequestPrepareProposal) (*abciv2.ResponsePrepareProposal, error) {
 	resp, err := a.ABCIApplicationClient.PrepareProposal(context.Background(), &abciv1.RequestPrepareProposal{
+		ChainId: "local_devnet",
 		BlockData: &typesv1.Data{
 			Txs: req.Txs,
 		},
@@ -322,8 +324,22 @@ func (a *RemoteABCIClientV1) PrepareProposal(req *abciv2.RequestPrepareProposal)
 
 // ProcessProposal implements abciv2.ABCI
 func (a *RemoteABCIClientV1) ProcessProposal(req *abciv2.RequestProcessProposal) (*abciv2.ResponseProcessProposal, error) {
+	appVersion := a.endBlockConsensusAppVersion
+	if appVersion == 0 {
+		infoResp, err := a.Info(&abciv2.RequestInfo{})
+		if err != nil {
+			return nil, err
+		}
+
+		appVersion = infoResp.AppVersion
+	}
+
 	resp, err := a.ABCIApplicationClient.ProcessProposal(context.Background(), &abciv1.RequestProcessProposal{
 		Header: typesv1.Header{
+			Version: versionv1.Consensus{
+				App: appVersion,
+			},
+			ChainID:            "local_devnet",
 			Height:             req.Height,
 			Time:               req.Time,
 			NextValidatorsHash: req.NextValidatorsHash,

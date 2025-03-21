@@ -25,7 +25,6 @@ type Multiplexer struct {
 	logger log.Logger
 	mu     sync.Mutex
 
-	lastHeight     int64
 	lastAppVersion uint64
 	started        bool
 
@@ -36,13 +35,22 @@ type Multiplexer struct {
 	conn     *grpc.ClientConn
 }
 
+// NewVersions returns a list of versions sorted by app version.
+func NewVersions(v ...Version) (Versions, error) {
+	versions := Versions(v)
+	if err := versions.Validate(); err != nil {
+		return nil, err
+	}
+	return versions.Sorted(), nil
+}
+
 // NewMultiplexer creates a new ABCI wrapper for multiplexing
 func NewMultiplexer(
 	logger log.Logger,
 	v *viper.Viper,
 	latestApp servertypes.ABCI,
 	versions Versions,
-	currentHeight int64,
+	applicationVersion uint64,
 ) (proxy.ClientCreator, func() error, error) {
 	var noOpCleanUp = func() error {
 		return nil
@@ -53,32 +61,23 @@ func NewMultiplexer(
 	}
 
 	wrapper := &Multiplexer{
-		logger:     logger,
-		latestApp:  latestApp,
-		versions:   versions.Sorted(),
-		lastHeight: currentHeight,
+		logger:         logger,
+		latestApp:      latestApp,
+		versions:       versions,
+		lastAppVersion: applicationVersion,
 	}
-
-	var (
-		currentVersion Version
-		err            error
-	)
 
 	// prepare correct version
-	if currentHeight == 0 {
-		currentVersion, err = versions.GenesisVersion()
-	} else {
-		currentVersion, err = versions.GetForHeight(currentHeight)
-	}
+	currentVersion, err := versions.GetForAppVersion(wrapper.lastAppVersion)
 	if err != nil && errors.Is(err, ErrNoVersionFound) {
 		return proxy.NewLocalClientCreator(wrapper), noOpCleanUp, nil // no version found, assume latest
 	} else if err != nil {
-		return nil, noOpCleanUp, fmt.Errorf("failed to get app for height %d: %w", currentHeight, err)
+		return nil, noOpCleanUp, fmt.Errorf("failed to get app for version %d: %w", wrapper.lastAppVersion, err)
 	}
 
 	// start the correct version
 	if currentVersion.Appd == nil {
-		return nil, noOpCleanUp, fmt.Errorf("appd is nil for height %d", currentHeight)
+		return nil, noOpCleanUp, fmt.Errorf("appd is nil for version %d", wrapper.lastAppVersion)
 	}
 
 	if currentVersion.Appd.Pid() == appd.AppdStopped {
@@ -125,35 +124,31 @@ func NewMultiplexer(
 	return proxy.NewConnSyncLocalClientCreator(wrapper), wrapper.Cleanup, nil
 }
 
-// getAppForHeight gets the appropriate app based on height
-func (m *Multiplexer) getAppForHeight(height int64) (servertypes.ABCI, error) {
+// getApp gets the appropriate app based on the latest application version.
+func (m *Multiplexer) getApp() (servertypes.ABCI, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	// use the latest app if the height is beyond all defined versions
-	if m.versions.ShouldLatestApp(height) {
-		// TODO: start the latest app here if not already started
+	// get the appropriate version for the latest app version.
+	currentVersion, err := m.versions.GetForAppVersion(m.lastAppVersion)
+	if err != nil {
+		m.logger.Info("No app found in multiplexer for app version; using latest app", "app_version", m.lastAppVersion, "err", err)
+		panic("TOOD: start latest app here")
 		return m.latestApp, nil
 	}
 
-	// get the appropriate version for this height
-	currentVersion, err := m.versions.GetForHeight(height)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get app for height %d: %w", height, err)
-	}
-
 	// check if we need to start the app or if we have a different app running
-	if !m.started || currentVersion.UntilHeight != m.activeVersion.UntilHeight {
+	if !m.started || currentVersion.AppVersion != m.activeVersion.AppVersion {
 		if currentVersion.Appd == nil {
-			return nil, fmt.Errorf("appd is nil for height %d", height)
+			return nil, fmt.Errorf("appd is nil for version %d", m.activeVersion.AppVersion)
 		}
 
 		// check if an app is already started
 		// stop the app if it's running
 		if m.activeVersion.Appd != nil && m.activeVersion.Appd.Pid() != appd.AppdStopped {
-			m.logger.Info("Stopping app for height", "height", m.activeVersion.UntilHeight)
+			m.logger.Info("Stopping app for version", "maximum_app_version", m.activeVersion.AppVersion)
 			if err := m.activeVersion.Appd.Stop(); err != nil {
-				return nil, fmt.Errorf("failed to stop app for height %d: %w", m.activeVersion.UntilHeight, err)
+				return nil, fmt.Errorf("failed to stop app for version %d: %w", m.activeVersion.AppVersion, err)
 			}
 			m.started = false
 			m.activeVersion = Version{}
@@ -174,18 +169,21 @@ func (m *Multiplexer) getAppForHeight(height int64) (servertypes.ABCI, error) {
 				programArgs = os.Args[2:] // Remove 'appd start' args
 			}
 
+			m.logger.Info("Starting app for version", "app_version", currentVersion.AppVersion, "args", programArgs)
 			if err := currentVersion.Appd.Start(currentVersion.GetStartArgs(programArgs)...); err != nil {
-				return nil, fmt.Errorf("failed to start app for height %d: %w", height, err)
+				return nil, fmt.Errorf("failed to start app for version %d: %w", m.lastAppVersion, err)
 			}
 
 			if currentVersion.Appd.Pid() == appd.AppdStopped {
-				return nil, fmt.Errorf("app for height %d failed to start", height)
+				return nil, fmt.Errorf("app for version %d failed to start", m.latestApp)
 			}
 
 			m.activeVersion = currentVersion
 			m.started = true
 		}
 	}
+
+	m.logger.Info("Using ABCI remote connection", "maximum_app_version", currentVersion.AppVersion, "abci_version", currentVersion.ABCIVersion.String())
 
 	switch currentVersion.ABCIVersion {
 	case ABCIClientVersion1:
@@ -206,9 +204,9 @@ func (m *Multiplexer) Cleanup() error {
 
 	// stop any running app
 	if m.activeVersion.Appd != nil && m.activeVersion.Appd.Pid() != appd.AppdStopped {
-		m.logger.Info("Stopping app for height", "height", m.activeVersion.UntilHeight)
+		m.logger.Info("Stopping app for version", "maximum_app_version", m.activeVersion.AppVersion)
 		if err := m.activeVersion.Appd.Stop(); err != nil {
-			errs = errors.Join(errs, fmt.Errorf("failed to stop app for height %d: %w", m.activeVersion.UntilHeight, err))
+			errs = errors.Join(errs, fmt.Errorf("failed to stop app for version %d: %w", m.activeVersion.AppVersion, err))
 		}
 		m.started = false
 		m.activeVersion = Version{}
@@ -226,64 +224,65 @@ func (m *Multiplexer) Cleanup() error {
 }
 
 func (m *Multiplexer) ApplySnapshotChunk(_ context.Context, req *abci.RequestApplySnapshotChunk) (*abci.ResponseApplySnapshotChunk, error) {
-	app, err := m.getAppForHeight(m.lastHeight)
+	app, err := m.getApp()
 	if err != nil {
-		return nil, fmt.Errorf("failed to get app for height %d: %w", m.lastHeight, err)
+		return nil, fmt.Errorf("failed to get app for version %d: %w", m.lastAppVersion, err)
 	}
 	return app.ApplySnapshotChunk(req)
 }
 
 func (m *Multiplexer) CheckTx(_ context.Context, req *abci.RequestCheckTx) (*abci.ResponseCheckTx, error) {
-	app, err := m.getAppForHeight(m.lastHeight)
+	app, err := m.getApp()
 	if err != nil {
-		return nil, fmt.Errorf("failed to get app for height %d: %w", m.lastHeight, err)
+		return nil, fmt.Errorf("failed to get app for version %d: %w", m.lastAppVersion, err)
 	}
 	return app.CheckTx(req)
 }
 
 func (m *Multiplexer) Commit(context.Context, *abci.RequestCommit) (*abci.ResponseCommit, error) {
-	app, err := m.getAppForHeight(m.lastHeight)
+	app, err := m.getApp()
 	if err != nil {
-		return nil, fmt.Errorf("failed to get app for height %d: %w", m.lastHeight, err)
+		return nil, fmt.Errorf("failed to get app for version %d: %w", m.lastAppVersion, err)
 	}
 	return app.Commit()
 }
 
 func (m *Multiplexer) ExtendVote(ctx context.Context, req *abci.RequestExtendVote) (*abci.ResponseExtendVote, error) {
-	m.lastHeight = req.Height
-	app, err := m.getAppForHeight(req.Height)
+	app, err := m.getApp()
 	if err != nil {
-		return nil, fmt.Errorf("failed to get app for height %d: %w", req.Height, err)
+		return nil, fmt.Errorf("failed to get app for version %d: %w", m.lastAppVersion, err)
 	}
 	return app.ExtendVote(ctx, req)
 }
 
 func (m *Multiplexer) FinalizeBlock(_ context.Context, req *abci.RequestFinalizeBlock) (*abci.ResponseFinalizeBlock, error) {
-	app, err := m.getAppForHeight(req.Height)
+	app, err := m.getApp()
 	if err != nil {
-		return nil, fmt.Errorf("failed to get app for height %d: %w", req.Height, err)
+		return nil, fmt.Errorf("failed to get app for version %d: %w", m.lastAppVersion, err)
 	}
 
 	resp, err := app.FinalizeBlock(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to finalize block: %w", err)
+	}
 
-	// update the last height and app version
-	m.lastHeight = req.Height
+	// update the app version
 	m.lastAppVersion = resp.ConsensusParamUpdates.GetVersion().App
 
 	return resp, err
 }
 
 func (m *Multiplexer) Info(_ context.Context, req *abci.RequestInfo) (*abci.ResponseInfo, error) {
-	app, err := m.getAppForHeight(m.lastHeight)
+	app, err := m.getApp()
 	if err != nil {
-		return nil, fmt.Errorf("failed to get app for height %d: %w", m.lastHeight, err)
+		return nil, fmt.Errorf("failed to get app for version %d: %w", m.lastAppVersion, err)
 	}
 
 	return app.Info(req)
 }
 
 func (m *Multiplexer) InitChain(_ context.Context, req *abci.RequestInitChain) (*abci.ResponseInitChain, error) {
-	app, err := m.getAppForHeight(0)
+	app, err := m.getApp()
 	if err != nil {
 		return nil, fmt.Errorf("failed to get app for genesis: %w", err)
 	}
@@ -291,60 +290,57 @@ func (m *Multiplexer) InitChain(_ context.Context, req *abci.RequestInitChain) (
 }
 
 func (m *Multiplexer) ListSnapshots(_ context.Context, req *abci.RequestListSnapshots) (*abci.ResponseListSnapshots, error) {
-	app, err := m.getAppForHeight(m.lastHeight)
+	app, err := m.getApp()
 	if err != nil {
-		return nil, fmt.Errorf("failed to get app for height %d: %w", m.lastHeight, err)
+		return nil, fmt.Errorf("failed to get app for version %d: %w", m.lastAppVersion, err)
 	}
 	return app.ListSnapshots(req)
 }
 
 func (m *Multiplexer) LoadSnapshotChunk(_ context.Context, req *abci.RequestLoadSnapshotChunk) (*abci.ResponseLoadSnapshotChunk, error) {
-	app, err := m.getAppForHeight(int64(req.Height))
+	app, err := m.getApp()
 	if err != nil {
-		return nil, fmt.Errorf("failed to get app for height %d: %w", req.Height, err)
+		return nil, fmt.Errorf("failed to get app for version %d: %w", m.lastAppVersion, err)
 	}
 	return app.LoadSnapshotChunk(req)
 }
 
 func (m *Multiplexer) OfferSnapshot(_ context.Context, req *abci.RequestOfferSnapshot) (*abci.ResponseOfferSnapshot, error) {
-	app, err := m.getAppForHeight(m.lastHeight)
+	app, err := m.getApp()
 	if err != nil {
-		return nil, fmt.Errorf("failed to get app for height %d: %w", m.lastHeight, err)
+		return nil, fmt.Errorf("failed to get app for version %d: %w", m.lastAppVersion, err)
 	}
 	return app.OfferSnapshot(req)
 }
 
 func (m *Multiplexer) PrepareProposal(_ context.Context, req *abci.RequestPrepareProposal) (*abci.ResponsePrepareProposal, error) {
-	m.lastHeight = req.Height
-	app, err := m.getAppForHeight(req.Height)
+	app, err := m.getApp()
 	if err != nil {
-		return nil, fmt.Errorf("failed to get app for height %d: %w", req.Height, err)
+		return nil, fmt.Errorf("failed to get app for version %d: %w", m.lastAppVersion, err)
 	}
 	return app.PrepareProposal(req)
 }
 
 func (m *Multiplexer) ProcessProposal(_ context.Context, req *abci.RequestProcessProposal) (*abci.ResponseProcessProposal, error) {
-	m.lastHeight = req.Height
-	app, err := m.getAppForHeight(req.Height)
+	app, err := m.getApp()
 	if err != nil {
-		return nil, fmt.Errorf("failed to get app for height %d: %w", req.Height, err)
+		return nil, fmt.Errorf("failed to get app for version %d: %w", m.lastAppVersion, err)
 	}
 	return app.ProcessProposal(req)
 }
 
 func (m *Multiplexer) Query(ctx context.Context, req *abci.RequestQuery) (*abci.ResponseQuery, error) {
-	app, err := m.getAppForHeight(req.Height)
+	app, err := m.getApp()
 	if err != nil {
-		return nil, fmt.Errorf("failed to get app for height %d: %w", req.Height, err)
+		return nil, fmt.Errorf("failed to get app for version %d: %w", m.lastAppVersion, err)
 	}
 	return app.Query(ctx, req)
 }
 
 func (m *Multiplexer) VerifyVoteExtension(_ context.Context, req *abci.RequestVerifyVoteExtension) (*abci.ResponseVerifyVoteExtension, error) {
-	m.lastHeight = req.Height
-	app, err := m.getAppForHeight(req.Height)
+	app, err := m.getApp()
 	if err != nil {
-		return nil, fmt.Errorf("failed to get app for height %d: %w", req.Height, err)
+		return nil, fmt.Errorf("failed to get app for version %d: %w", m.lastAppVersion, err)
 	}
 	return app.VerifyVoteExtension(req)
 }

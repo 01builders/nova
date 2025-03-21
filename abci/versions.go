@@ -1,19 +1,15 @@
 package abci
 
 import (
-	"errors"
 	"fmt"
 	"sort"
 
 	"github.com/01builders/nova/appd"
 )
 
-// ErrNoVersionFound is returned when no remote version is found for a given height.
-var ErrNoVersionFound = errors.New("no version found")
-
 // Version defines the configuration for remote apps.
 type Version struct {
-	Name        string
+	AppVersion  uint64
 	ABCIVersion ABCIClientVersion
 	Appd        *appd.Appd
 	UntilHeight int64
@@ -26,73 +22,49 @@ type Versions []Version
 // Sorted returns a sorted slice of Versions, sorted by UntilHeight (ascending).
 func (v Versions) Sorted() Versions {
 	// convert map to slice
-	versionList := make([]Version, 0, len(v))
+	versionList := make([]Version, 0)
 	for _, ver := range v {
 		versionList = append(versionList, ver)
 	}
 
-	// sort by UntilHeight in ascending order
+	// sort by AppVersion in ascending order
 	sort.SliceStable(versionList, func(i, j int) bool {
-		return versionList[i].UntilHeight < versionList[j].UntilHeight
+		return versionList[i].AppVersion < versionList[j].AppVersion
 	})
 
 	return versionList
 }
 
-// GenesisVersion returns the genesis version.
-func (v Versions) GenesisVersion() (Version, error) {
-	var genesis Version
-	var minHeight int64 = -1
-
-	for _, version := range v {
-		if minHeight == -1 || version.UntilHeight < minHeight {
-			minHeight = version.UntilHeight
-			genesis = version
-		}
+// GetForAppVersion returns the version for a given appVersion.
+// if the app version specified is lower than the minimum app version, return the lowest version.
+func (v Versions) GetForAppVersion(appVersion uint64) (Version, error) {
+	if len(v) == 0 {
+		return Version{}, fmt.Errorf("%w: %d", ErrNoVersionFound, appVersion)
 	}
 
-	if minHeight == -1 {
-		return Version{}, fmt.Errorf("%w: no genesis version found", ErrNoVersionFound)
+	lowestVersion := v[0]
+	highestVersion := v[len(v)-1]
+
+	// the version being specified is higher than any version we have, we assume this is the latest version.
+	if appVersion > highestVersion.AppVersion {
+		return Version{}, fmt.Errorf("%w: %d", ErrNoVersionFound, appVersion)
 	}
 
-	return genesis, nil
-}
-
-// GetForName returns the version for a given name.
-func (v Versions) GetForName(name string) (Version, error) {
 	for _, version := range v {
-		if version.Name == name {
+		if version.AppVersion == appVersion {
 			return version, nil
 		}
 	}
-	return Version{}, fmt.Errorf("%w: %s", ErrNoVersionFound, name)
+
+	// return the lowest version if the exact version is not found.
+	return lowestVersion, nil
 }
 
-// GetForHeight returns the version for a given height.
-func (v Versions) GetForHeight(height int64) (Version, error) {
-	var selectedVersion Version
-	for _, version := range v {
-		if version.UntilHeight >= height {
-			selectedVersion = version
-			break
-		}
-	}
-
-	if selectedVersion.UntilHeight < height {
-		return Version{}, fmt.Errorf("%w: %d", ErrNoVersionFound, height)
-	}
-
-	return selectedVersion, nil
-}
-
-// ShouldLatestApp returns true if the given height is higher than all version's UntilHeight.
-func (v Versions) ShouldLatestApp(height int64) bool {
-	for _, version := range v {
-		if version.UntilHeight >= height {
-			return false
-		}
-	}
-	return true
+// ShouldUseLatestApp returns true if there is no version found with the given appVersion.
+func (v Versions) ShouldUseLatestApp(appVersion uint64) bool {
+	// should only use the latest app if there are no versions to use based on desired version.
+	_, err := v.GetForAppVersion(appVersion)
+	return err != nil
 }
 
 // GetStartArgs returns the appropriate args.
@@ -111,14 +83,19 @@ func (v Version) GetStartArgs(args []string) []string {
 	)
 }
 
-// Validate checks for duplicate names in a slice of Versions.
+// Validate checks for duplicate app versions in a slice of Versions.
 func (v Versions) Validate() error {
-	seen := make(map[string]struct{})
-	for _, v := range v {
-		if _, exists := seen[v.Name]; exists {
-			return fmt.Errorf("version with name %s specified multiple times", v.Name)
-		}
-		seen[v.Name] = struct{}{}
+	if len(v) == 0 {
+		return fmt.Errorf("no versions specified")
 	}
+
+	seen := make(map[uint64]struct{})
+	for _, ver := range v {
+		if _, exists := seen[ver.AppVersion]; exists {
+			return fmt.Errorf("version %d specified multiple times", ver.AppVersion)
+		}
+		seen[ver.AppVersion] = struct{}{}
+	}
+
 	return nil
 }
