@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"os"
 	"strings"
 	"sync"
@@ -107,9 +108,13 @@ func NewMultiplexer(
 	// remove tcp:// prefix if present
 	tmAddress = strings.TrimPrefix(tmAddress, "tcp://")
 
-	conn, err := grpc.Dial( //nolint:staticcheck: we want to check the connection.
+	conn, err := grpc.NewClient(
 		tmAddress,
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		grpc.WithDefaultCallOptions(
+			grpc.MaxCallSendMsgSize(math.MaxInt),
+			grpc.MaxCallRecvMsgSize(math.MaxInt),
+		),
 	)
 	if err != nil {
 		return nil, noOpCleanUp, fmt.Errorf("failed to prepare app connection: %w", err)
@@ -150,8 +155,8 @@ func (m *Multiplexer) getApp() (servertypes.ABCI, error) {
 		}
 
 		if currentVersion.Appd.Pid() == appd.AppdStopped {
-			if currentVersion.PreHandler != "" {
-				preCmd := currentVersion.Appd.CreateExecCommand(currentVersion.PreHandler)
+			for _, preHandler := range currentVersion.PreHandlers {
+				preCmd := currentVersion.Appd.CreateExecCommand(preHandler)
 				if err := preCmd.Run(); err != nil {
 					m.logger.Info("Warning: PreHandler failed", "err", err)
 					// Continue anyway as the pre-handler might be optional

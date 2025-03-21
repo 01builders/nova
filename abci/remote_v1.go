@@ -269,16 +269,21 @@ func (a *RemoteABCIClientV1) LoadSnapshotChunk(req *abciv2.RequestLoadSnapshotCh
 
 // OfferSnapshot implements abciv2.ABCI
 func (a *RemoteABCIClientV1) OfferSnapshot(req *abciv2.RequestOfferSnapshot) (*abciv2.ResponseOfferSnapshot, error) {
+	snapshot := &abciv1.Snapshot{}
+	if req.GetSnapshot() != nil {
+		snapshot = &abciv1.Snapshot{
+			Height:   req.Snapshot.Height,
+			Format:   req.Snapshot.Format,
+			Chunks:   req.Snapshot.Chunks,
+			Hash:     req.Snapshot.Hash,
+			Metadata: req.Snapshot.Metadata,
+		}
+	}
+
 	resp, err := a.ABCIApplicationClient.OfferSnapshot(
 		context.Background(),
 		&abciv1.RequestOfferSnapshot{
-			Snapshot: &abciv1.Snapshot{
-				Height:   req.Snapshot.Height,
-				Format:   req.Snapshot.Format,
-				Chunks:   req.Snapshot.Chunks,
-				Hash:     req.Snapshot.Hash,
-				Metadata: req.Snapshot.Metadata,
-			},
+			Snapshot:   snapshot,
 			AppHash:    req.AppHash,
 			AppVersion: req.AppVersion,
 		},
