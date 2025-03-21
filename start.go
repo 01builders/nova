@@ -3,8 +3,6 @@ package nova
 import (
 	"context"
 	"fmt"
-	"github.com/cosmos/cosmos-db"
-	"github.com/cosmos/cosmos-sdk/server"
 	"io"
 	"net"
 	"os"
@@ -21,6 +19,7 @@ import (
 	pvm "github.com/cometbft/cometbft/privval"
 	"github.com/cometbft/cometbft/rpc/client/local"
 	cmttypes "github.com/cometbft/cometbft/types"
+	db "github.com/cosmos/cosmos-db"
 	"github.com/hashicorp/go-metrics"
 	"github.com/spf13/viper"
 	"golang.org/x/sync/errgroup"
@@ -29,6 +28,7 @@ import (
 
 	"github.com/cosmos/cosmos-sdk/client"
 	"github.com/cosmos/cosmos-sdk/codec"
+	"github.com/cosmos/cosmos-sdk/server"
 	"github.com/cosmos/cosmos-sdk/server/api"
 	serverconfig "github.com/cosmos/cosmos-sdk/server/config"
 	servergrpc "github.com/cosmos/cosmos-sdk/server/grpc"

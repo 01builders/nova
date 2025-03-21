@@ -27,12 +27,7 @@ This allows interacting with older app versions for debugging or older queries.`
 				return errors.New("cannot passthrough start command")
 			}
 
-			// Get the version
-			versionStr := args[0]
-			if strings.HasPrefix(versionStr, "v") {
-				versionStr = versionStr[1:]
-			}
-
+			versionStr := strings.TrimPrefix(args[0], "v")
 			version, err := strconv.ParseUint(versionStr, 10, 64)
 			if err != nil {
 				return fmt.Errorf("failed to parse version: %w", err)
@@ -51,6 +46,7 @@ This allows interacting with older app versions for debugging or older queries.`
 			if appVersion.Appd == nil {
 				return fmt.Errorf("no binary available for version %d", version)
 			}
+
 			// prepare the command to be executed
 			execCmd := appVersion.Appd.CreateExecCommand(args[1:]...)
 			return execCmd.Run()

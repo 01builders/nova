@@ -4,10 +4,11 @@ import (
 	"bytes"
 	"testing"
 
-	"github.com/01builders/nova/abci"
-	"github.com/01builders/nova/appd"
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/require"
+
+	"github.com/01builders/nova/abci"
+	"github.com/01builders/nova/appd"
 )
 
 func TestNewPassthroughCmd(t *testing.T) {
@@ -44,9 +45,7 @@ func TestNewPassthroughCmd(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-
 			cmd := NewPassthroughCmd(tt.versions)
-
 			cmd.SetOut(&bytes.Buffer{})
 			cmd.SetErr(&bytes.Buffer{})
 			output, err := executeCommand(t, cmd, tt.args...)

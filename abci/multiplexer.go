@@ -77,7 +77,7 @@ func NewMultiplexer(
 
 	// start the correct version
 	if currentVersion.Appd == nil {
-		return nil, noOpCleanUp, fmt.Errorf("appd is nil for version %d", applicationVersion)
+		return nil, noOpCleanUp, fmt.Errorf("appd is nil for version %d", wrapper.lastAppVersion)
 	}
 
 	if currentVersion.Appd.Pid() == appd.AppdStopped {
@@ -132,7 +132,7 @@ func (m *Multiplexer) getApp() (servertypes.ABCI, error) {
 	// get the appropriate version for the latest app version.
 	currentVersion, err := m.versions.GetForAppVersion(m.lastAppVersion)
 	if err != nil {
-		m.logger.Info("failed to get embedded app for version, returning latest app.", "app_version", m.lastAppVersion, "err", err, "app", m.latestApp)
+		m.logger.Info("no app found in multiplexer for app version; using latest app", "app_version", m.lastAppVersion, "err", err)
 		panic("TOOD: start latest app here")
 		return m.latestApp, nil
 	}
