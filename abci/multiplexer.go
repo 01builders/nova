@@ -147,7 +147,7 @@ func (m *Multiplexer) getApp() (servertypes.ABCI, error) {
 	}
 
 	// check if we need to start the app or if we have a different app running
-	if !m.started || currentVersion.AppVersion != m.activeVersion.AppVersion {
+	if !m.appVersionChangedButShouldStillCommit && (!m.started || currentVersion.AppVersion != m.activeVersion.AppVersion) {
 		if currentVersion.Appd == nil {
 			return nil, fmt.Errorf("appd is nil for version %d", m.activeVersion.AppVersion)
 		}
