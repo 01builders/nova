@@ -86,7 +86,7 @@ func start(versions abci.Versions, svrCtx *server.Context, clientCtx client.Cont
 		"chain_id", state.ChainID,
 		"uses_latest_app", usesLatestApp)
 
-	mp, err := abci.NewMultiplexer(svrCtx, appCreator, versions, state.ChainID, appVersion)
+	mp, err := abci.NewMultiplexer(svrCtx, svrCfg, appCreator, versions, state.ChainID, appVersion)
 	if err != nil {
 		return err
 	}
@@ -97,17 +97,10 @@ func start(versions abci.Versions, svrCtx *server.Context, clientCtx client.Cont
 		}
 	}()
 
-	// StartApp will either start the latest app natively, or an embedded app if one is specified.
-	if err := mp.StartApp(); err != nil {
+	// Start will either start the latest app natively, or an embedded app if one is specified.
+	if err := mp.Start(); err != nil {
 		return fmt.Errorf("failed to start app: %w", err)
 	}
-
-	metrics, err := startTelemetry(svrCfg)
-	if err != nil {
-		return err
-	}
-
-	emitServerInfoMetrics()
 
 	cmtCfg := svrCtx.Config
 	gRPCOnly := svrCtx.Viper.GetBool(flagGRPCOnly)
@@ -151,7 +144,7 @@ func start(versions abci.Versions, svrCtx *server.Context, clientCtx client.Cont
 		return err
 	}
 
-	if err = startAPIServer(ctx, g, svrCfg, clientCtx, svrCtx, app, cmtCfg.RootDir, grpcSrv, metrics); err != nil {
+	if err = startAPIServer(ctx, g, svrCfg, clientCtx, svrCtx, app, cmtCfg.RootDir, grpcSrv, nil); err != nil {
 		return err
 	}
 

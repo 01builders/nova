@@ -12,8 +12,13 @@ import (
 	cmttypes "github.com/cometbft/cometbft/types"
 	db "github.com/cosmos/cosmos-db"
 	"github.com/cosmos/cosmos-sdk/server"
+	serverconfig "github.com/cosmos/cosmos-sdk/server/config"
 	servercmtlog "github.com/cosmos/cosmos-sdk/server/log"
+	"github.com/cosmos/cosmos-sdk/telemetry"
+	"github.com/cosmos/cosmos-sdk/version"
 	genutiltypes "github.com/cosmos/cosmos-sdk/x/genutil/types"
+	"github.com/hashicorp/go-metrics"
+	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc/credentials/insecure"
 	"io"
 	"math"
@@ -40,6 +45,8 @@ type Multiplexer struct {
 	mu     sync.Mutex
 
 	svrCtx *server.Context
+	svrCfg serverconfig.Config
+	cmtCfg *cmtcfg.Config
 
 	lastAppVersion uint64
 	started        bool
@@ -48,6 +55,7 @@ type Multiplexer struct {
 	latestApp     servertypes.ABCI
 	activeVersion Version
 	chainID       string
+	tmNode        *node.Node
 
 	versions   Versions
 	conn       *grpc.ClientConn
@@ -66,6 +74,7 @@ func NewVersions(v ...Version) (Versions, error) {
 // NewMultiplexer creates a new ABCI wrapper for multiplexing
 func NewMultiplexer(
 	svrCtx *server.Context,
+	svrCfg serverconfig.Config,
 	appCreator servertypes.AppCreator,
 	versions Versions,
 	chainID string,
@@ -77,6 +86,7 @@ func NewMultiplexer(
 
 	mp := &Multiplexer{
 		svrCtx:         svrCtx,
+		svrCfg:         svrCfg,
 		appCreator:     appCreator,
 		logger:         svrCtx.Logger.With("multiplexer"),
 		latestApp:      nil, // app will be initialized if required by the multiplexer.
@@ -94,8 +104,52 @@ func (m *Multiplexer) registerCleanupFn(cleanUpFn func() error) {
 	m.cleanupFns = append(m.cleanupFns, cleanUpFn)
 }
 
+func (m *Multiplexer) Start() error {
+	metrics, err := startTelemetry(m.svrCfg)
+	if err != nil {
+		return err
+	}
+	_ = metrics
+
+	g, ctx := getCtx(m.svrCtx, true)
+
+	emitServerInfoMetrics()
+
+	// startApp starts the underlying application, either native or embedded.
+	if err := m.startApp(); err != nil {
+		return err
+	}
+
+	// startCmtNode starts the comet node.
+	if err := m.startCmtNode(ctx); err != nil {
+		return err
+	}
+
+	// startGRPC the grpc server in the case of a native app. If using an embedded app
+	// it will use that instead.
+	if err := m.startGRPC(); err != nil {
+		return err
+	}
+
+	// startAPI starts teh api server for a native app. If using an embedded app
+	// it will use that instead.
+	if err := m.startAPI(); err != nil {
+		return err
+	}
+
+	return g.Wait()
+}
+
+func (m *Multiplexer) startGRPC() error {
+	return nil
+}
+
+func (m *Multiplexer) startAPI() error {
+	return nil
+}
+
 // StartApp starts either the native app, or an embedded app.
-func (m *Multiplexer) StartApp() error {
+func (m *Multiplexer) startApp() error {
 	// prepare correct version
 	currentVersion, err := m.versions.GetForAppVersion(m.lastAppVersion)
 	if err != nil && errors.Is(err, ErrNoVersionFound) {
@@ -245,9 +299,9 @@ func (m *Multiplexer) getApp() (servertypes.ABCI, error) {
 		}
 
 		m.logger.Info("No app found in multiplexer for app version; using latest app", "app_version", m.lastAppVersion, "err", err)
-		if m.latestApp == nil {
+		if !m.started {
 			m.logger.Info("Starting latest app")
-			if err := m.StartApp(); err != nil {
+			if err := m.Start(); err != nil {
 				return nil, fmt.Errorf("failed to start latest app: %w", err)
 			}
 		}
@@ -361,21 +415,20 @@ func (m *Multiplexer) Cleanup() error {
 	return errs
 }
 
-func (m *Multiplexer) StartCmtNode(
-	ctx context.Context,
-	cfg *cmtcfg.Config,
-) (tmNode *node.Node, err error) {
+// startCmtNode initializes and starts a CometBFT node, sets up cleanup tasks, and assigns it to the Multiplexer instance.
+func (m *Multiplexer) startCmtNode(ctx context.Context) error {
+	cfg := m.svrCtx.Config
 	nodeKey, err := p2p.LoadOrGenNodeKey(cfg.NodeKeyFile())
 	if err != nil {
-		return nil, err
+		return err
 	}
 
-	//if !isLatestApp {
-	// Register cleanup handler for remote apps
-	//m.setupRemoteAppCleanup(m.Cleanup) // TODO: this doesn't make sense atm
-	//}
+	// no latest app set means an embedded app is being used.
+	if m.latestApp == nil {
+		m.setupRemoteAppCleanup(m.Cleanup)
+	}
 
-	tmNode, err = node.NewNodeWithContext(
+	tmNode, err := node.NewNodeWithContext(
 		ctx,
 		cfg,
 		pvm.LoadOrGenFilePV(cfg.PrivValidatorKeyFile(), cfg.PrivValidatorStateFile()),
@@ -388,11 +441,11 @@ func (m *Multiplexer) StartCmtNode(
 	)
 
 	if err != nil {
-		return tmNode, err
+		return err
 	}
 
 	if err := tmNode.Start(); err != nil {
-		return tmNode, err
+		return err
 	}
 
 	m.registerCleanupFn(func() error {
@@ -402,11 +455,12 @@ func (m *Multiplexer) StartCmtNode(
 		return nil
 	})
 
-	return tmNode, nil
+	m.tmNode = tmNode
+	return nil
 }
 
 // setupRemoteAppCleanup ensures that remote app processes are terminated when the main process receives termination signals
-func (m *Multiplexer) setupRemoteAppCleanup(cleanupFn func() error) { // TODO: call this somewhere
+func (m *Multiplexer) setupRemoteAppCleanup(cleanupFn func() error) {
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
 
@@ -436,4 +490,35 @@ func getGenDocProvider(cfg *cmtcfg.Config) func() (*cmttypes.GenesisDoc, error) 
 
 		return appGenesis.ToGenesisDoc()
 	}
+}
+
+func startTelemetry(cfg serverconfig.Config) (*telemetry.Metrics, error) {
+	return telemetry.New(cfg.Telemetry)
+}
+
+// emitServerInfoMetrics emits server info related metrics using application telemetry.
+func emitServerInfoMetrics() {
+	var ls []metrics.Label
+
+	versionInfo := version.NewInfo()
+	if len(versionInfo.GoVersion) > 0 {
+		ls = append(ls, telemetry.NewLabel("go", versionInfo.GoVersion))
+	}
+	if len(versionInfo.CosmosSdkVersion) > 0 {
+		ls = append(ls, telemetry.NewLabel("version", versionInfo.CosmosSdkVersion))
+	}
+
+	if len(ls) == 0 {
+		return
+	}
+
+	telemetry.SetGaugeWithLabels([]string{"server", "info"}, 1, ls)
+}
+
+func getCtx(svrCtx *server.Context, block bool) (*errgroup.Group, context.Context) {
+	ctx, cancelFn := context.WithCancel(context.Background())
+	g, ctx := errgroup.WithContext(ctx)
+	// listen for quit signals so the calling parent process can gracefully exit
+	server.ListenForQuitSignals(g, block, cancelFn, svrCtx.Logger)
+	return g, ctx
 }
