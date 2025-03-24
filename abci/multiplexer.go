@@ -117,16 +117,19 @@ func (m *Multiplexer) Start() error {
 	emitServerInfoMetrics()
 
 	// startApp starts the underlying application, either native or embedded.
+	m.logger.Info("starting app", "app_version", m.lastAppVersion)
 	if err := m.startApp(); err != nil {
 		return err
 	}
 
 	if !m.isGrpcOnly() {
-		// TODO: log
-		if err := m.startCmtNode(ctx); err != nil {
-			return err
+		m.logger.Info("starting comet node")
+		if m.tmNode == nil { // TODO: filthy hack
+			if err := m.startCmtNode(ctx); err != nil {
+				return err
+			}
+			m.logger.Info("comet node started successfully")
 		}
-		return nil
 	} else {
 		m.logger.Info("starting node in gRPC only mode; CometBFT is disabled")
 		m.svrCfg.GRPC.Enable = true // TODO: this shouldn't be required?
@@ -134,7 +137,7 @@ func (m *Multiplexer) Start() error {
 
 	app, ok := m.latestApp.(servertypes.Application)
 	if !ok {
-		return fmt.Errorf("latest app is not an application") // should never happen
+		m.logger.Info("using embedded app")
 	}
 
 	// startGRPC the grpc server in the case of a native app. If using an embedded app
@@ -179,6 +182,7 @@ func (m *Multiplexer) startApp() error {
 	currentVersion, err := m.versions.GetForAppVersion(m.lastAppVersion)
 	if err != nil && errors.Is(err, ErrNoVersionFound) {
 		// no version found, assume latest
+		m.logger.Info("starting native app")
 		if err := m.startNativeApp(); err != nil {
 			return fmt.Errorf("failed to start native app: %w", err)
 		}
@@ -201,6 +205,7 @@ func (m *Multiplexer) startApp() error {
 		}
 
 		// start an embedded app.
+		m.logger.Info("starting embedded app", "app_version", currentVersion.AppVersion, "args", currentVersion.GetStartArgs(programArgs))
 		if err := currentVersion.Appd.Start(currentVersion.GetStartArgs(programArgs)...); err != nil {
 			return fmt.Errorf("failed to start app: %w", err)
 		}
@@ -239,6 +244,8 @@ func (m *Multiplexer) initRemoteGrpcConn() error {
 	if err != nil {
 		return fmt.Errorf("failed to prepare app connection: %w", err)
 	}
+
+	m.logger.Info("initialized remote app client", "address", tmAddress)
 	m.conn = conn
 	return nil
 }
@@ -432,6 +439,7 @@ func (m *Multiplexer) getApp() (servertypes.ABCI, error) {
 
 // startEmbeddedApp starts an embedded version of the app.
 func (m *Multiplexer) startEmbeddedApp(version Version) error {
+	m.logger.Info("Starting embedded app", "app_version", version.AppVersion, "abci_version", version.ABCIVersion.String())
 	if version.Appd == nil {
 		return fmt.Errorf("appd is nil for version %d", m.activeVersion.AppVersion)
 	}
@@ -494,6 +502,8 @@ func (m *Multiplexer) Cleanup() error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
+	m.logger.Info("cleaning up multiplexer")
+
 	var errs error
 
 	// stop any running app
@@ -528,6 +538,7 @@ func (m *Multiplexer) startCmtNode(ctx context.Context) error {
 
 	// no latest app set means an embedded app is being used.
 	if m.latestApp == nil {
+		m.logger.Debug("registering remote app cleanup")
 		m.setupRemoteAppCleanup(m.Cleanup)
 	}
 
