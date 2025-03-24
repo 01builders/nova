@@ -192,10 +192,6 @@ func (m *Multiplexer) getApp() (servertypes.ABCI, error) {
 		}
 	}
 
-	if m.appVersionChangedButShouldStillCommit {
-		m.appVersionChangedButShouldStillCommit = false
-	}
-
 	m.logger.Info("Using ABCI remote connection", "maximum_app_version", m.activeVersion.AppVersion, "abci_version", m.activeVersion.ABCIVersion.String(), "chain_id", m.chainID)
 
 	switch m.activeVersion.ABCIVersion {
@@ -257,6 +253,10 @@ func (m *Multiplexer) Commit(context.Context, *abci.RequestCommit) (*abci.Respon
 	app, err := m.getApp()
 	if err != nil {
 		return nil, fmt.Errorf("failed to get app for version %d: %w", m.lastAppVersion, err)
+	}
+
+	if m.appVersionChangedButShouldStillCommit {
+		m.appVersionChangedButShouldStillCommit = false
 	}
 
 	return app.Commit()
