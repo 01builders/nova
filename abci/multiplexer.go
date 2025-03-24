@@ -4,13 +4,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/01builders/nova/internal"
 	cmtcfg "github.com/cometbft/cometbft/config"
 	"github.com/cometbft/cometbft/node"
 	"github.com/cometbft/cometbft/p2p"
 	pvm "github.com/cometbft/cometbft/privval"
 	"github.com/cometbft/cometbft/proxy"
 	"github.com/cometbft/cometbft/rpc/client/local"
-	cmttypes "github.com/cometbft/cometbft/types"
 	db "github.com/cosmos/cosmos-db"
 	"github.com/cosmos/cosmos-sdk/client"
 	"github.com/cosmos/cosmos-sdk/codec"
@@ -21,7 +21,6 @@ import (
 	servercmtlog "github.com/cosmos/cosmos-sdk/server/log"
 	"github.com/cosmos/cosmos-sdk/telemetry"
 	"github.com/cosmos/cosmos-sdk/version"
-	genutiltypes "github.com/cosmos/cosmos-sdk/x/genutil/types"
 	"github.com/hashicorp/go-metrics"
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc/credentials/insecure"
@@ -117,7 +116,6 @@ func (m *Multiplexer) Start() error {
 	emitServerInfoMetrics()
 
 	// startApp starts the underlying application, either native or embedded.
-	m.logger.Info("starting app", "app_version", m.lastAppVersion)
 	if err := m.startApp(); err != nil {
 		return err
 	}
@@ -152,7 +150,7 @@ func (m *Multiplexer) Start() error {
 			app.RegisterNodeService(m.clientContext, m.svrCfg)
 		}
 
-		grpcServer, clientContext, err := m.startGRPC(ctx, g, m.svrCfg.GRPC, m.clientContext)
+		grpcServer, clientContext, err := m.startGRPCServer(ctx, g, m.svrCfg.GRPC, m.clientContext)
 		if err != nil {
 			return err
 		}
@@ -182,7 +180,7 @@ func (m *Multiplexer) startApp() error {
 	currentVersion, err := m.versions.GetForAppVersion(m.lastAppVersion)
 	if err != nil && errors.Is(err, ErrNoVersionFound) {
 		// no version found, assume latest
-		m.logger.Info("starting native app")
+		m.logger.Info("starting native app", "app_version", m.lastAppVersion)
 		if err := m.startNativeApp(); err != nil {
 			return fmt.Errorf("failed to start native app: %w", err)
 		}
@@ -190,8 +188,6 @@ func (m *Multiplexer) startApp() error {
 	} else if err != nil {
 		return fmt.Errorf("failed to get app for version %d: %w", m.lastAppVersion, err)
 	}
-
-	// we are starting an embedded app instead of a native app.
 
 	// start the correct version
 	if currentVersion.Appd == nil {
@@ -250,8 +246,8 @@ func (m *Multiplexer) initRemoteGrpcConn() error {
 	return nil
 }
 
-// startGRPC initializes and starts a gRPC server if enabled in the configuration, returning the server and updated context.
-func (m *Multiplexer) startGRPC(ctx context.Context, g *errgroup.Group, config serverconfig.GRPCConfig, clientCtx client.Context) (*grpc.Server, client.Context, error) {
+// startGRPCServer initializes and starts a gRPC server if enabled in the configuration, returning the server and updated context.
+func (m *Multiplexer) startGRPCServer(ctx context.Context, g *errgroup.Group, config serverconfig.GRPCConfig, clientCtx client.Context) (*grpc.Server, client.Context, error) {
 	_, _, err := net.SplitHostPort(config.Address)
 	if err != nil {
 		return nil, clientCtx, err
@@ -286,7 +282,7 @@ func (m *Multiplexer) startGRPC(ctx context.Context, g *errgroup.Group, config s
 
 	app, ok := m.latestApp.(servertypes.Application)
 	if !ok {
-		// should never happen.
+		// should never happen as we only want to start a new grpc server if we're using the latest app.
 		return nil, clientCtx, fmt.Errorf("latest app is not an application")
 	}
 
@@ -301,7 +297,7 @@ func (m *Multiplexer) startGRPC(ctx context.Context, g *errgroup.Group, config s
 		return servergrpc.StartGRPCServer(ctx, m.svrCtx.Logger.With(log.ModuleKey, "grpc-server"), config, grpcSrv)
 	})
 
-	m.conn = grpcClient // TODO: is m.conn needed here?
+	m.conn = grpcClient
 	return grpcSrv, clientCtx, nil
 }
 
@@ -410,7 +406,7 @@ func (m *Multiplexer) getApp() (servertypes.ABCI, error) {
 
 		m.logger.Info("No app found in multiplexer for app version; using latest app", "app_version", m.lastAppVersion, "err", err)
 		if !m.started {
-			m.logger.Info("Starting latest app")
+			m.logger.Info("starting latest app")
 			if err := m.Start(); err != nil {
 				return nil, fmt.Errorf("failed to start latest app: %w", err)
 			}
@@ -548,7 +544,7 @@ func (m *Multiplexer) startCmtNode(ctx context.Context) error {
 		pvm.LoadOrGenFilePV(cfg.PrivValidatorKeyFile(), cfg.PrivValidatorStateFile()),
 		nodeKey,
 		proxy.NewConnSyncLocalClientCreator(m),
-		getGenDocProvider(cfg),
+		internal.GetGenDocProvider(cfg),
 		cmtcfg.DefaultDBProvider,
 		node.DefaultMetricsProvider(cfg.Instrumentation),
 		servercmtlog.CometLoggerWrapper{Logger: m.logger},
@@ -592,18 +588,6 @@ func (m *Multiplexer) setupRemoteAppCleanup(cleanupFn func() error) {
 		signal.Reset(os.Interrupt, syscall.SIGTERM)
 		syscall.Kill(os.Getpid(), sig.(syscall.Signal))
 	}()
-}
-
-// returns a function which returns the genesis doc from the genesis file.
-func getGenDocProvider(cfg *cmtcfg.Config) func() (*cmttypes.GenesisDoc, error) {
-	return func() (*cmttypes.GenesisDoc, error) {
-		appGenesis, err := genutiltypes.AppGenesisFromFile(cfg.GenesisFile())
-		if err != nil {
-			return nil, err
-		}
-
-		return appGenesis.ToGenesisDoc()
-	}
 }
 
 func startTelemetry(cfg serverconfig.Config) (*telemetry.Metrics, error) {

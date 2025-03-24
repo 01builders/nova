@@ -3,21 +3,15 @@ package nova
 import (
 	"fmt"
 	"github.com/01builders/nova/abci"
+	"github.com/01builders/nova/internal"
 	dbm "github.com/cometbft/cometbft-db"
 	cmtcfg "github.com/cometbft/cometbft/config"
 	"github.com/cometbft/cometbft/node"
 	"github.com/cometbft/cometbft/state"
-	cmttypes "github.com/cometbft/cometbft/types"
 	"github.com/cosmos/cosmos-sdk/client"
 	"github.com/cosmos/cosmos-sdk/server"
 	serverconfig "github.com/cosmos/cosmos-sdk/server/config"
 	"github.com/cosmos/cosmos-sdk/server/types"
-	genutiltypes "github.com/cosmos/cosmos-sdk/x/genutil/types"
-)
-
-const (
-	flagTraceStore = "trace-store"
-	flagGRPCOnly   = "grpc-only"
 )
 
 // StartCommandHandler is the type that must implement nova to match Cosmos SDK start logic.
@@ -54,12 +48,7 @@ func start(versions abci.Versions, svrCtx *server.Context, clientCtx client.Cont
 
 	appVersion := state.Version.Consensus.App
 
-	// Check if we should use latest app or not
-	usesLatestApp := versions.ShouldUseLatestApp(appVersion)
-	svrCtx.Logger.Info("determining app version to use",
-		"app_version", appVersion,
-		"chain_id", state.ChainID,
-		"uses_latest_app", usesLatestApp)
+	svrCtx.Logger.Info("initializing multiplexer", "app_version", appVersion, "chain_id", state.ChainID)
 
 	mp, err := abci.NewMultiplexer(svrCtx, svrCfg, clientCtx, appCreator, versions, state.ChainID, appVersion)
 	if err != nil {
@@ -74,7 +63,7 @@ func start(versions abci.Versions, svrCtx *server.Context, clientCtx client.Cont
 
 	// Start will either start the latest app natively, or an embedded app if one is specified.
 	if err := mp.Start(); err != nil {
-		return fmt.Errorf("failed to start app: %w", err)
+		return fmt.Errorf("failed to start multiplexer: %w", err)
 	}
 
 	return nil
@@ -88,7 +77,7 @@ func getState(cfg *cmtcfg.Config) (state.State, error) {
 	}
 	defer db.Close()
 
-	s, _, err := node.LoadStateFromDBOrGenesisDocProvider(db, getGenDocProvider(cfg))
+	s, _, err := node.LoadStateFromDBOrGenesisDocProvider(db, internal.GetGenDocProvider(cfg))
 	if err != nil {
 		return state.State{}, err
 	}
@@ -106,18 +95,6 @@ func getAndValidateConfig(svrCtx *server.Context) (serverconfig.Config, error) {
 		return config, err
 	}
 	return config, nil
-}
-
-// returns a function which returns the genesis doc from the genesis file.
-func getGenDocProvider(cfg *cmtcfg.Config) func() (*cmttypes.GenesisDoc, error) {
-	return func() (*cmttypes.GenesisDoc, error) {
-		appGenesis, err := genutiltypes.AppGenesisFromFile(cfg.GenesisFile())
-		if err != nil {
-			return nil, err
-		}
-
-		return appGenesis.ToGenesisDoc()
-	}
 }
 
 func openDBM(cfg *cmtcfg.Config) (dbm.DB, error) {
