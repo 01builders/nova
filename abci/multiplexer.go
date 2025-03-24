@@ -9,10 +9,15 @@ import (
 	"github.com/cometbft/cometbft/p2p"
 	pvm "github.com/cometbft/cometbft/privval"
 	"github.com/cometbft/cometbft/proxy"
+	"github.com/cometbft/cometbft/rpc/client/local"
 	cmttypes "github.com/cometbft/cometbft/types"
 	db "github.com/cosmos/cosmos-db"
+	"github.com/cosmos/cosmos-sdk/client"
+	"github.com/cosmos/cosmos-sdk/codec"
 	"github.com/cosmos/cosmos-sdk/server"
+	"github.com/cosmos/cosmos-sdk/server/api"
 	serverconfig "github.com/cosmos/cosmos-sdk/server/config"
+	servergrpc "github.com/cosmos/cosmos-sdk/server/grpc"
 	servercmtlog "github.com/cosmos/cosmos-sdk/server/log"
 	"github.com/cosmos/cosmos-sdk/telemetry"
 	"github.com/cosmos/cosmos-sdk/version"
@@ -22,6 +27,7 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 	"io"
 	"math"
+	"net"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -38,6 +44,7 @@ import (
 
 const (
 	flagTraceStore = "trace-store"
+	flagGRPCOnly   = "grpc-only"
 )
 
 type Multiplexer struct {
@@ -57,9 +64,10 @@ type Multiplexer struct {
 	chainID       string
 	tmNode        *node.Node
 
-	versions   Versions
-	conn       *grpc.ClientConn
-	cleanupFns []func() error
+	versions      Versions
+	conn          *grpc.ClientConn
+	cleanupFns    []func() error
+	clientContext client.Context
 }
 
 // NewVersions returns a list of versions sorted by app version.
@@ -72,14 +80,7 @@ func NewVersions(v ...Version) (Versions, error) {
 }
 
 // NewMultiplexer creates a new ABCI wrapper for multiplexing
-func NewMultiplexer(
-	svrCtx *server.Context,
-	svrCfg serverconfig.Config,
-	appCreator servertypes.AppCreator,
-	versions Versions,
-	chainID string,
-	applicationVersion uint64,
-) (*Multiplexer, error) {
+func NewMultiplexer(svrCtx *server.Context, svrCfg serverconfig.Config, clientCtx client.Context, appCreator servertypes.AppCreator, versions Versions, chainID string, applicationVersion uint64) (*Multiplexer, error) {
 	if err := versions.Validate(); err != nil {
 		return nil, fmt.Errorf("invalid versions: %w", err)
 	}
@@ -87,6 +88,7 @@ func NewMultiplexer(
 	mp := &Multiplexer{
 		svrCtx:         svrCtx,
 		svrCfg:         svrCfg,
+		clientContext:  clientCtx,
 		appCreator:     appCreator,
 		logger:         svrCtx.Logger.With("multiplexer"),
 		latestApp:      nil, // app will be initialized if required by the multiplexer.
@@ -99,18 +101,17 @@ func NewMultiplexer(
 	return mp, nil
 }
 
+// isGrpcOnly checks if the GRPC-only mode is enabled using the configuration flag.
+func (m *Multiplexer) isGrpcOnly() bool {
+	return m.svrCtx.Viper.GetBool(flagGRPCOnly)
+}
+
 // registerCleanupFn enables the registration of additional cleanup functions that get called during Cleanup
 func (m *Multiplexer) registerCleanupFn(cleanUpFn func() error) {
 	m.cleanupFns = append(m.cleanupFns, cleanUpFn)
 }
 
 func (m *Multiplexer) Start() error {
-	metrics, err := startTelemetry(m.svrCfg)
-	if err != nil {
-		return err
-	}
-	_ = metrics
-
 	g, ctx := getCtx(m.svrCtx, true)
 
 	emitServerInfoMetrics()
@@ -120,35 +121,59 @@ func (m *Multiplexer) Start() error {
 		return err
 	}
 
-	// startCmtNode starts the comet node.
-	if err := m.startCmtNode(ctx); err != nil {
-		return err
+	if !m.isGrpcOnly() {
+		// TODO: log
+		if err := m.startCmtNode(ctx); err != nil {
+			return err
+		}
+		return nil
+	} else {
+		m.logger.Info("starting node in gRPC only mode; CometBFT is disabled")
+		m.svrCfg.GRPC.Enable = true // TODO: this shouldn't be required?
+	}
+
+	app, ok := m.latestApp.(servertypes.Application)
+	if !ok {
+		return fmt.Errorf("latest app is not an application") // should never happen
 	}
 
 	// startGRPC the grpc server in the case of a native app. If using an embedded app
 	// it will use that instead.
-	if err := m.startGRPC(); err != nil {
-		return err
-	}
+	if m.svrCfg.GRPC.Enable {
+		if m.svrCfg.API.Enable || m.svrCfg.GRPC.Enable {
+			// Re-assign for making the client available below do not use := to avoid
+			// shadowing the clientCtx variable.
+			m.clientContext = m.clientContext.WithClient(local.New(m.tmNode))
+			app.RegisterTxService(m.clientContext)
+			app.RegisterTendermintService(m.clientContext)
+			app.RegisterNodeService(m.clientContext, m.svrCfg)
+		}
 
-	// startAPI starts teh api server for a native app. If using an embedded app
-	// it will use that instead.
-	if err := m.startAPI(); err != nil {
-		return err
+		grpcServer, clientContext, err := m.startGRPC(ctx, g, m.svrCfg.GRPC, m.clientContext)
+		if err != nil {
+			return err
+		}
+		m.clientContext = clientContext // update client context with grpc
+
+		// startAPIServer starts the api server for a native app. If using an embedded app
+		// it will use that instead.
+		if m.svrCfg.API.Enable {
+			metrics, err := startTelemetry(m.svrCfg)
+			if err != nil {
+				return err
+			}
+
+			if err := m.startAPIServer(ctx, g, m.cmtCfg.RootDir, grpcServer, metrics); err != nil {
+				return err
+			}
+		}
+
 	}
 
 	return g.Wait()
 }
 
-func (m *Multiplexer) startGRPC() error {
-	return nil
-}
-
-func (m *Multiplexer) startAPI() error {
-	return nil
-}
-
-// StartApp starts either the native app, or an embedded app.
+// startApp starts either the native app, or an embedded app.
 func (m *Multiplexer) startApp() error {
 	// prepare correct version
 	currentVersion, err := m.versions.GetForAppVersion(m.lastAppVersion)
@@ -215,6 +240,84 @@ func (m *Multiplexer) initRemoteGrpcConn() error {
 		return fmt.Errorf("failed to prepare app connection: %w", err)
 	}
 	m.conn = conn
+	return nil
+}
+
+// startGRPC initializes and starts a gRPC server if enabled in the configuration, returning the server and updated context.
+func (m *Multiplexer) startGRPC(ctx context.Context, g *errgroup.Group, config serverconfig.GRPCConfig, clientCtx client.Context) (*grpc.Server, client.Context, error) {
+	_, _, err := net.SplitHostPort(config.Address)
+	if err != nil {
+		return nil, clientCtx, err
+	}
+
+	maxSendMsgSize := config.MaxSendMsgSize
+	if maxSendMsgSize == 0 {
+		maxSendMsgSize = serverconfig.DefaultGRPCMaxSendMsgSize
+	}
+
+	maxRecvMsgSize := config.MaxRecvMsgSize
+	if maxRecvMsgSize == 0 {
+		maxRecvMsgSize = serverconfig.DefaultGRPCMaxRecvMsgSize
+	}
+
+	// if gRPC is enabled, configure gRPC client for gRPC gateway
+	grpcClient, err := grpc.NewClient(
+		config.Address,
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		grpc.WithDefaultCallOptions(
+			grpc.ForceCodec(codec.NewProtoCodec(clientCtx.InterfaceRegistry).GRPCCodec()),
+			grpc.MaxCallRecvMsgSize(maxRecvMsgSize),
+			grpc.MaxCallSendMsgSize(maxSendMsgSize),
+		),
+	)
+	if err != nil {
+		return nil, clientCtx, err
+	}
+
+	clientCtx = clientCtx.WithGRPCClient(grpcClient)
+	m.logger.Debug("gRPC client assigned to client context", "target", config.Address)
+
+	app, ok := m.latestApp.(servertypes.Application)
+	if !ok {
+		// should never happen.
+		return nil, clientCtx, fmt.Errorf("latest app is not an application")
+	}
+
+	grpcSrv, err := servergrpc.NewGRPCServer(clientCtx, app, config)
+	if err != nil {
+		return nil, clientCtx, err
+	}
+
+	// Start the gRPC server in a goroutine. Note, the provided ctx will ensure
+	// that the server is gracefully shut down.
+	g.Go(func() error {
+		return servergrpc.StartGRPCServer(ctx, m.svrCtx.Logger.With(log.ModuleKey, "grpc-server"), config, grpcSrv)
+	})
+
+	m.conn = grpcClient // TODO: is m.conn needed here?
+	return grpcSrv, clientCtx, nil
+}
+
+func (m *Multiplexer) startAPIServer(ctx context.Context, g *errgroup.Group, home string, grpcSrv *grpc.Server, metrics *telemetry.Metrics) error {
+
+	app, ok := m.latestApp.(servertypes.Application)
+	if !ok {
+		// should never happen
+		return fmt.Errorf("latest app is not a valid application type")
+	}
+
+	m.clientContext = m.clientContext.WithHomeDir(home)
+
+	apiSrv := api.New(m.clientContext, m.svrCtx.Logger.With(log.ModuleKey, "api-server"), grpcSrv)
+	app.RegisterAPIRoutes(apiSrv, m.svrCfg.API)
+
+	if m.svrCfg.Telemetry.Enabled {
+		apiSrv.SetTelemetry(metrics)
+	}
+
+	g.Go(func() error {
+		return apiSrv.Start(ctx, m.svrCfg)
+	})
 	return nil
 }
 
