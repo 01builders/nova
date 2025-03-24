@@ -4,36 +4,45 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	db "github.com/cosmos/cosmos-db"
+	"github.com/cosmos/cosmos-sdk/server"
+	"google.golang.org/grpc/credentials/insecure"
+	"io"
 	"math"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 
-	"github.com/spf13/viper"
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials/insecure"
-
 	"cosmossdk.io/log"
 	abci "github.com/cometbft/cometbft/abci/types"
-	"github.com/cometbft/cometbft/proxy"
 	servertypes "github.com/cosmos/cosmos-sdk/server/types"
+	"google.golang.org/grpc"
 
 	"github.com/01builders/nova/appd"
+)
+
+const (
+	flagTraceStore = "trace-store"
 )
 
 type Multiplexer struct {
 	logger log.Logger
 	mu     sync.Mutex
 
+	svrCtx *server.Context
+
 	lastAppVersion uint64
 	started        bool
 
+	appCreator    servertypes.AppCreator
 	latestApp     servertypes.ABCI
 	activeVersion Version
 	chainID       string
 
-	versions Versions
-	conn     *grpc.ClientConn
+	versions   Versions
+	conn       *grpc.ClientConn
+	cleanupFns []func() error
 }
 
 // NewVersions returns a list of versions sorted by app version.
@@ -47,41 +56,54 @@ func NewVersions(v ...Version) (Versions, error) {
 
 // NewMultiplexer creates a new ABCI wrapper for multiplexing
 func NewMultiplexer(
-	logger log.Logger,
-	v *viper.Viper,
-	latestApp servertypes.ABCI,
+	svrCtx *server.Context,
+	appCreator servertypes.AppCreator,
 	versions Versions,
 	chainID string,
 	applicationVersion uint64,
-) (proxy.ClientCreator, func() error, error) {
-	var noOpCleanUp = func() error {
-		return nil
-	}
-
+) (*Multiplexer, error) {
 	if err := versions.Validate(); err != nil {
-		return nil, noOpCleanUp, fmt.Errorf("invalid versions: %w", err)
+		return nil, fmt.Errorf("invalid versions: %w", err)
 	}
 
-	wrapper := &Multiplexer{
-		logger:         logger,
-		latestApp:      latestApp,
+	mp := &Multiplexer{
+		svrCtx:         svrCtx,
+		appCreator:     appCreator,
+		logger:         svrCtx.Logger.With("multiplexer"),
+		latestApp:      nil, // app will be initialized if required by the multiplexer.
 		versions:       versions,
 		chainID:        chainID,
 		lastAppVersion: applicationVersion,
+		cleanupFns:     make([]func() error, 0),
 	}
 
+	return mp, nil
+}
+
+// registerCleanupFn enables the registration of additional cleanup functions that get called during Cleanup
+func (m *Multiplexer) registerCleanupFn(cleanUpFn func() error) {
+	m.cleanupFns = append(m.cleanupFns, cleanUpFn)
+}
+
+// StartApp starts either the native app, or an embedded app.
+func (m *Multiplexer) StartApp() error {
 	// prepare correct version
-	currentVersion, err := versions.GetForAppVersion(wrapper.lastAppVersion)
+	currentVersion, err := m.versions.GetForAppVersion(m.lastAppVersion)
 	if err != nil && errors.Is(err, ErrNoVersionFound) {
 		// no version found, assume latest
-		return proxy.NewConnSyncLocalClientCreator(wrapper), noOpCleanUp, nil
+		if err := m.startNativeApp(); err != nil {
+			return fmt.Errorf("failed to start native app: %w", err)
+		}
+		return nil
 	} else if err != nil {
-		return nil, noOpCleanUp, fmt.Errorf("failed to get app for version %d: %w", wrapper.lastAppVersion, err)
+		return fmt.Errorf("failed to get app for version %d: %w", m.lastAppVersion, err)
 	}
+
+	// we are starting an embedded app instead of a native app.
 
 	// start the correct version
 	if currentVersion.Appd == nil {
-		return nil, noOpCleanUp, fmt.Errorf("appd is nil for version %d", wrapper.lastAppVersion)
+		return fmt.Errorf("appd is nil for version %d", m.lastAppVersion)
 	}
 
 	if currentVersion.Appd.Pid() == appd.AppdStopped {
@@ -90,21 +112,27 @@ func NewMultiplexer(
 			programArgs = os.Args[2:] // remove 'appd start' args
 		}
 
+		// start an embedded app.
 		if err := currentVersion.Appd.Start(currentVersion.GetStartArgs(programArgs)...); err != nil {
-			return nil, noOpCleanUp, fmt.Errorf("failed to start app: %w", err)
+			return fmt.Errorf("failed to start app: %w", err)
 		}
 
 		if currentVersion.Appd.Pid() == appd.AppdStopped { // should never happen
-			return nil, noOpCleanUp, fmt.Errorf("app failed to start")
+			return fmt.Errorf("app failed to start")
 		}
 
-		wrapper.started = true
-		wrapper.activeVersion = currentVersion
+		m.started = true
+		m.activeVersion = currentVersion
 	}
 
+	return m.initRemoteGrpcConn()
+}
+
+// initRemoteGrpcConn initializes a gRPC connection to the remote application client and configures transport credentials.
+func (m *Multiplexer) initRemoteGrpcConn() error {
 	// prepare remote app client
 	const flagTMAddress = "address"
-	tmAddress := v.GetString(flagTMAddress)
+	tmAddress := m.svrCtx.Viper.GetString(flagTMAddress)
 	if tmAddress == "" {
 		tmAddress = "127.0.0.1:26658"
 	}
@@ -121,11 +149,75 @@ func NewMultiplexer(
 		),
 	)
 	if err != nil {
-		return nil, noOpCleanUp, fmt.Errorf("failed to prepare app connection: %w", err)
+		return fmt.Errorf("failed to prepare app connection: %w", err)
 	}
-	wrapper.conn = conn
+	m.conn = conn
+	return nil
+}
 
-	return proxy.NewConnSyncLocalClientCreator(wrapper), wrapper.Cleanup, nil
+func (m *Multiplexer) startNativeApp() error {
+	traceWriter, traceCleanupFn, err := setupTraceWriter(m.svrCtx)
+	if err != nil {
+		return err
+	}
+	m.registerCleanupFn(func() error {
+		traceCleanupFn()
+		return nil
+	})
+
+	home := m.svrCtx.Config.RootDir
+	db, err := openDB(home, server.GetAppDBBackend(m.svrCtx.Viper))
+	if err != nil {
+		return err
+	}
+
+	app := m.appCreator(m.logger, db, traceWriter, m.svrCtx.Viper)
+	m.latestApp = app
+	m.started = true
+
+	m.registerCleanupFn(func() error {
+		return app.Close()
+	})
+
+	return nil
+}
+
+func setupTraceWriter(svrCtx *server.Context) (traceWriter io.WriteCloser, cleanup func(), err error) {
+	// clean up the traceWriter when the server is shutting down
+	cleanup = func() {}
+
+	traceWriterFile := svrCtx.Viper.GetString(flagTraceStore)
+	traceWriter, err = openTraceWriter(traceWriterFile)
+	if err != nil {
+		return traceWriter, cleanup, err
+	}
+
+	// if flagTraceStore is not used then traceWriter is nil
+	if traceWriter != nil {
+		cleanup = func() {
+			if err = traceWriter.Close(); err != nil {
+				svrCtx.Logger.Error("failed to close trace writer", "err", err)
+			}
+		}
+	}
+
+	return traceWriter, cleanup, nil
+}
+
+func openDB(rootDir string, backendType db.BackendType) (db.DB, error) {
+	dataDir := filepath.Join(rootDir, "data")
+	return db.NewDB("application", backendType, dataDir)
+}
+
+func openTraceWriter(traceWriterFile string) (w io.WriteCloser, err error) {
+	if traceWriterFile == "" {
+		return
+	}
+	return os.OpenFile(
+		traceWriterFile,
+		os.O_WRONLY|os.O_APPEND|os.O_CREATE,
+		0o666,
+	)
 }
 
 // getApp gets the appropriate app based on the latest application version.
@@ -136,8 +228,19 @@ func (m *Multiplexer) getApp() (servertypes.ABCI, error) {
 	// get the appropriate version for the latest app version.
 	currentVersion, err := m.versions.GetForAppVersion(m.lastAppVersion)
 	if err != nil {
+		// if we are switching from an embedded binary to a native one, we need to ensure that we stop it
+		// before we start the native app.
+		if err := m.StopActiveVersion(); err != nil {
+			return nil, fmt.Errorf("failed to stop active version: %w", err)
+		}
+
 		m.logger.Info("No app found in multiplexer for app version; using latest app", "app_version", m.lastAppVersion, "err", err)
-		panic("TOOD: start latest app here")
+		if m.latestApp == nil {
+			m.logger.Info("Starting latest app")
+			if err := m.StartApp(); err != nil {
+				return nil, fmt.Errorf("failed to start latest app: %w", err)
+			}
+		}
 		return m.latestApp, nil
 	}
 
@@ -147,15 +250,9 @@ func (m *Multiplexer) getApp() (servertypes.ABCI, error) {
 			return nil, fmt.Errorf("appd is nil for version %d", m.activeVersion.AppVersion)
 		}
 
-		// check if an app is already started
-		// stop the app if it's running
-		if m.activeVersion.Appd != nil && m.activeVersion.Appd.Pid() != appd.AppdStopped {
-			m.logger.Info("Stopping app for version", "maximum_app_version", m.activeVersion.AppVersion)
-			if err := m.activeVersion.Appd.Stop(); err != nil {
-				return nil, fmt.Errorf("failed to stop app for version %d: %w", m.activeVersion.AppVersion, err)
-			}
-			m.started = false
-			m.activeVersion = Version{}
+		// stop the existing app version if one is currently running.
+		if err := m.StopActiveVersion(); err != nil {
+			return nil, fmt.Errorf("failed to stop active version: %w", err)
 		}
 
 		if currentVersion.Appd.Pid() == appd.AppdStopped {
@@ -199,6 +296,24 @@ func (m *Multiplexer) getApp() (servertypes.ABCI, error) {
 	return nil, fmt.Errorf("unknown ABCI client version %d", currentVersion.ABCIVersion)
 }
 
+// embeddedVersionRunning returns true if there is an active version specified which is not stopped.
+func (m *Multiplexer) embeddedVersionRunning() bool {
+	return m.activeVersion.Appd != nil && m.activeVersion.Appd.Pid() != appd.AppdStopped
+}
+
+// StopActiveVersion stops any embedded app versions if they are currently running.
+func (m *Multiplexer) StopActiveVersion() error {
+	if m.embeddedVersionRunning() {
+		m.logger.Info("Stopping app for version", "active_app_version", m.activeVersion.AppVersion)
+		if err := m.activeVersion.Appd.Stop(); err != nil {
+			return fmt.Errorf("failed to stop app for version %d: %w", m.activeVersion.AppVersion, err)
+		}
+		m.started = false
+		m.activeVersion = Version{}
+	}
+	return nil
+}
+
 // Cleanup allows proper multiplexer termination.
 func (m *Multiplexer) Cleanup() error {
 	m.mu.Lock()
@@ -207,13 +322,9 @@ func (m *Multiplexer) Cleanup() error {
 	var errs error
 
 	// stop any running app
-	if m.activeVersion.Appd != nil && m.activeVersion.Appd.Pid() != appd.AppdStopped {
-		m.logger.Info("Stopping app for version", "maximum_app_version", m.activeVersion.AppVersion)
-		if err := m.activeVersion.Appd.Stop(); err != nil {
-			errs = errors.Join(errs, fmt.Errorf("failed to stop app for version %d: %w", m.activeVersion.AppVersion, err))
-		}
-		m.started = false
-		m.activeVersion = Version{}
+	// TODO: kill native app also?
+	if err := m.StopActiveVersion(); err != nil {
+		errs = errors.Join(errs, fmt.Errorf("failed to stop active version: %w", err))
 	}
 
 	// close gRPC connection
@@ -222,6 +333,12 @@ func (m *Multiplexer) Cleanup() error {
 			errs = errors.Join(errs, fmt.Errorf("failed to close gRPC connection: %w", err))
 		}
 		m.conn = nil
+	}
+
+	for _, fn := range m.cleanupFns {
+		if err := fn(); err != nil {
+			errs = errors.Join(errs, fmt.Errorf("failed to run cleanup function: %w", err))
+		}
 	}
 
 	return errs

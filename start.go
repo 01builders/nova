@@ -90,14 +90,19 @@ func start(versions abci.Versions, svrCtx *server.Context, clientCtx client.Cont
 	var app types.Application
 	var appCleanupFn func()
 
-	if usesLatestApp {
-		app, appCleanupFn, err = startApp(svrCtx, appCreator)
-		if err != nil {
-			return err
-		}
-
-		defer appCleanupFn()
+	mp, err := abci.NewMultiplexer(svrCtx, appCreator, versions, state.ChainID, appVersion)
+	if err != nil {
+		return err
 	}
+	//
+	//if usesLatestApp {
+	//	app, appCleanupFn, err = startApp(svrCtx, appCreator)
+	//	if err != nil {
+	//		return err
+	//	}
+	//
+	//	defer appCleanupFn()
+	//}
 
 	metrics, err := startTelemetry(svrCfg)
 	if err != nil {
@@ -192,9 +197,7 @@ func startCmtNode(
 	}
 
 	clientCreator, multiplexerCleanup, err := abci.NewMultiplexer(
-		svrCtx.Logger.With("multiplexer"),
-		svrCtx.Viper,
-		app,
+		svrCtx,
 		versions,
 		chainID,
 		applicationVersion,
