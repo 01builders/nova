@@ -4,18 +4,26 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	cmtcfg "github.com/cometbft/cometbft/config"
+	"github.com/cometbft/cometbft/node"
+	"github.com/cometbft/cometbft/p2p"
+	pvm "github.com/cometbft/cometbft/privval"
+	cmttypes "github.com/cometbft/cometbft/types"
 	db "github.com/cosmos/cosmos-db"
 	"github.com/cosmos/cosmos-sdk/server"
+	servercmtlog "github.com/cosmos/cosmos-sdk/server/log"
+	genutiltypes "github.com/cosmos/cosmos-sdk/x/genutil/types"
 	"google.golang.org/grpc/credentials/insecure"
 	"io"
 	"math"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"strings"
 	"sync"
+	"syscall"
 
 	"cosmossdk.io/log"
-	abci "github.com/cometbft/cometbft/abci/types"
 	servertypes "github.com/cosmos/cosmos-sdk/server/types"
 	"google.golang.org/grpc"
 
@@ -155,6 +163,7 @@ func (m *Multiplexer) initRemoteGrpcConn() error {
 	return nil
 }
 
+// startNativeApp starts a native app.
 func (m *Multiplexer) startNativeApp() error {
 	traceWriter, traceCleanupFn, err := setupTraceWriter(m.svrCtx)
 	if err != nil {
@@ -246,41 +255,8 @@ func (m *Multiplexer) getApp() (servertypes.ABCI, error) {
 
 	// check if we need to start the app or if we have a different app running
 	if !m.started || currentVersion.AppVersion != m.activeVersion.AppVersion {
-		if currentVersion.Appd == nil {
-			return nil, fmt.Errorf("appd is nil for version %d", m.activeVersion.AppVersion)
-		}
-
-		// stop the existing app version if one is currently running.
-		if err := m.StopActiveVersion(); err != nil {
-			return nil, fmt.Errorf("failed to stop active version: %w", err)
-		}
-
-		if currentVersion.Appd.Pid() == appd.AppdStopped {
-			for _, preHandler := range currentVersion.PreHandlers {
-				preCmd := currentVersion.Appd.CreateExecCommand(preHandler)
-				if err := preCmd.Run(); err != nil {
-					m.logger.Info("Warning: PreHandler failed", "err", err)
-					// Continue anyway as the pre-handler might be optional
-				}
-			}
-
-			// start the new app
-			programArgs := os.Args
-			if len(os.Args) > 2 {
-				programArgs = os.Args[2:] // Remove 'appd start' args
-			}
-
-			m.logger.Info("Starting app for version", "app_version", currentVersion.AppVersion, "args", programArgs)
-			if err := currentVersion.Appd.Start(currentVersion.GetStartArgs(programArgs)...); err != nil {
-				return nil, fmt.Errorf("failed to start app for version %d: %w", m.lastAppVersion, err)
-			}
-
-			if currentVersion.Appd.Pid() == appd.AppdStopped {
-				return nil, fmt.Errorf("app for version %d failed to start", m.latestApp)
-			}
-
-			m.activeVersion = currentVersion
-			m.started = true
+		if err := m.startEmbeddedApp(currentVersion); err != nil {
+			return nil, fmt.Errorf("failed to start embedded app: %w", err)
 		}
 	}
 
@@ -294,6 +270,47 @@ func (m *Multiplexer) getApp() (servertypes.ABCI, error) {
 	}
 
 	return nil, fmt.Errorf("unknown ABCI client version %d", currentVersion.ABCIVersion)
+}
+
+// startEmbeddedApp starts an embedded version of the app.
+func (m *Multiplexer) startEmbeddedApp(version Version) error {
+	if version.Appd == nil {
+		return fmt.Errorf("appd is nil for version %d", m.activeVersion.AppVersion)
+	}
+
+	// stop the existing app version if one is currently running.
+	if err := m.StopActiveVersion(); err != nil {
+		return fmt.Errorf("failed to stop active version: %w", err)
+	}
+
+	if version.Appd.Pid() == appd.AppdStopped {
+		for _, preHandler := range version.PreHandlers {
+			preCmd := version.Appd.CreateExecCommand(preHandler)
+			if err := preCmd.Run(); err != nil {
+				m.logger.Info("Warning: PreHandler failed", "err", err)
+				// Continue anyway as the pre-handler might be optional
+			}
+		}
+
+		// start the new app
+		programArgs := os.Args
+		if len(os.Args) > 2 {
+			programArgs = os.Args[2:] // Remove 'appd start' args
+		}
+
+		m.logger.Info("Starting app for version", "app_version", version.AppVersion, "args", programArgs)
+		if err := version.Appd.Start(version.GetStartArgs(programArgs)...); err != nil {
+			return fmt.Errorf("failed to start app for version %d: %w", m.lastAppVersion, err)
+		}
+
+		if version.Appd.Pid() == appd.AppdStopped {
+			return fmt.Errorf("app for version %d failed to start", m.latestApp)
+		}
+
+		m.activeVersion = version
+		m.started = true
+	}
+	return nil
 }
 
 // embeddedVersionRunning returns true if there is an active version specified which is not stopped.
@@ -322,7 +339,6 @@ func (m *Multiplexer) Cleanup() error {
 	var errs error
 
 	// stop any running app
-	// TODO: kill native app also?
 	if err := m.StopActiveVersion(); err != nil {
 		errs = errors.Join(errs, fmt.Errorf("failed to stop active version: %w", err))
 	}
@@ -344,124 +360,81 @@ func (m *Multiplexer) Cleanup() error {
 	return errs
 }
 
-func (m *Multiplexer) ApplySnapshotChunk(_ context.Context, req *abci.RequestApplySnapshotChunk) (*abci.ResponseApplySnapshotChunk, error) {
-	app, err := m.getApp()
+func (m *Multiplexer) StartCmtNode(
+	ctx context.Context,
+	cfg *cmtcfg.Config,
+) (tmNode *node.Node, cleanupFn func(), err error) {
+	nodeKey, err := p2p.LoadOrGenNodeKey(cfg.NodeKeyFile())
 	if err != nil {
-		return nil, fmt.Errorf("failed to get app for version %d: %w", m.lastAppVersion, err)
+		return nil, cleanupFn, err
 	}
-	return app.ApplySnapshotChunk(req)
+
+	//if !isLatestApp {
+	// Register cleanup handler for remote apps
+	//m.setupRemoteAppCleanup(m.Cleanup) // TODO: this doesn't make sense atm
+	//}
+
+	// TODO: provide a client creator
+
+	tmNode, err = node.NewNodeWithContext(
+		ctx,
+		cfg,
+		pvm.LoadOrGenFilePV(cfg.PrivValidatorKeyFile(), cfg.PrivValidatorStateFile()),
+		nodeKey,
+		clientCreator,
+		getGenDocProvider(cfg),
+		cmtcfg.DefaultDBProvider,
+		node.DefaultMetricsProvider(cfg.Instrumentation),
+		servercmtlog.CometLoggerWrapper{Logger: m.logger},
+	)
+
+	if err != nil {
+		return tmNode, cleanupFn, err
+	}
+
+	if err := tmNode.Start(); err != nil {
+		return tmNode, cleanupFn, err
+	}
+
+	m.registerCleanupFn(func() error {
+		if tmNode != nil && tmNode.IsRunning() {
+			return tmNode.Stop()
+		}
+		return nil
+	})
+
+	return tmNode, cleanupFn, nil
 }
 
-func (m *Multiplexer) CheckTx(_ context.Context, req *abci.RequestCheckTx) (*abci.ResponseCheckTx, error) {
-	app, err := m.getApp()
-	if err != nil {
-		return nil, fmt.Errorf("failed to get app for version %d: %w", m.lastAppVersion, err)
-	}
-	return app.CheckTx(req)
+// setupRemoteAppCleanup ensures that remote app processes are terminated when the main process receives termination signals
+func (m *Multiplexer) setupRemoteAppCleanup(cleanupFn func() error) { // TODO: call this somewhere
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
+
+	go func() {
+		sig := <-sigCh
+		m.logger.Info("Received signal, stopping remote apps...", "signal", sig)
+
+		if err := cleanupFn(); err != nil {
+			m.logger.Error("Error stopping remote apps", "err", err)
+		} else {
+			m.logger.Info("Successfully stopped remote apps")
+		}
+
+		// Re-send the signal to allow the normal process termination
+		signal.Reset(os.Interrupt, syscall.SIGTERM)
+		syscall.Kill(os.Getpid(), sig.(syscall.Signal))
+	}()
 }
 
-func (m *Multiplexer) Commit(context.Context, *abci.RequestCommit) (*abci.ResponseCommit, error) {
-	app, err := m.getApp()
-	if err != nil {
-		return nil, fmt.Errorf("failed to get app for version %d: %w", m.lastAppVersion, err)
+// returns a function which returns the genesis doc from the genesis file.
+func getGenDocProvider(cfg *cmtcfg.Config) func() (*cmttypes.GenesisDoc, error) {
+	return func() (*cmttypes.GenesisDoc, error) {
+		appGenesis, err := genutiltypes.AppGenesisFromFile(cfg.GenesisFile())
+		if err != nil {
+			return nil, err
+		}
+
+		return appGenesis.ToGenesisDoc()
 	}
-	return app.Commit()
-}
-
-func (m *Multiplexer) ExtendVote(ctx context.Context, req *abci.RequestExtendVote) (*abci.ResponseExtendVote, error) {
-	app, err := m.getApp()
-	if err != nil {
-		return nil, fmt.Errorf("failed to get app for version %d: %w", m.lastAppVersion, err)
-	}
-	return app.ExtendVote(ctx, req)
-}
-
-func (m *Multiplexer) FinalizeBlock(_ context.Context, req *abci.RequestFinalizeBlock) (*abci.ResponseFinalizeBlock, error) {
-	app, err := m.getApp()
-	if err != nil {
-		return nil, fmt.Errorf("failed to get app for version %d: %w", m.lastAppVersion, err)
-	}
-
-	resp, err := app.FinalizeBlock(req)
-	if err != nil {
-		return nil, fmt.Errorf("failed to finalize block: %w", err)
-	}
-
-	// update the app version
-	m.lastAppVersion = resp.ConsensusParamUpdates.GetVersion().App
-
-	return resp, err
-}
-
-func (m *Multiplexer) Info(_ context.Context, req *abci.RequestInfo) (*abci.ResponseInfo, error) {
-	app, err := m.getApp()
-	if err != nil {
-		return nil, fmt.Errorf("failed to get app for version %d: %w", m.lastAppVersion, err)
-	}
-
-	return app.Info(req)
-}
-
-func (m *Multiplexer) InitChain(_ context.Context, req *abci.RequestInitChain) (*abci.ResponseInitChain, error) {
-	app, err := m.getApp()
-	if err != nil {
-		return nil, fmt.Errorf("failed to get app for genesis: %w", err)
-	}
-	return app.InitChain(req)
-}
-
-func (m *Multiplexer) ListSnapshots(_ context.Context, req *abci.RequestListSnapshots) (*abci.ResponseListSnapshots, error) {
-	app, err := m.getApp()
-	if err != nil {
-		return nil, fmt.Errorf("failed to get app for version %d: %w", m.lastAppVersion, err)
-	}
-	return app.ListSnapshots(req)
-}
-
-func (m *Multiplexer) LoadSnapshotChunk(_ context.Context, req *abci.RequestLoadSnapshotChunk) (*abci.ResponseLoadSnapshotChunk, error) {
-	app, err := m.getApp()
-	if err != nil {
-		return nil, fmt.Errorf("failed to get app for version %d: %w", m.lastAppVersion, err)
-	}
-	return app.LoadSnapshotChunk(req)
-}
-
-func (m *Multiplexer) OfferSnapshot(_ context.Context, req *abci.RequestOfferSnapshot) (*abci.ResponseOfferSnapshot, error) {
-	app, err := m.getApp()
-	if err != nil {
-		return nil, fmt.Errorf("failed to get app for version %d: %w", m.lastAppVersion, err)
-	}
-	return app.OfferSnapshot(req)
-}
-
-func (m *Multiplexer) PrepareProposal(_ context.Context, req *abci.RequestPrepareProposal) (*abci.ResponsePrepareProposal, error) {
-	app, err := m.getApp()
-	if err != nil {
-		return nil, fmt.Errorf("failed to get app for version %d: %w", m.lastAppVersion, err)
-	}
-	return app.PrepareProposal(req)
-}
-
-func (m *Multiplexer) ProcessProposal(_ context.Context, req *abci.RequestProcessProposal) (*abci.ResponseProcessProposal, error) {
-	app, err := m.getApp()
-	if err != nil {
-		return nil, fmt.Errorf("failed to get app for version %d: %w", m.lastAppVersion, err)
-	}
-	return app.ProcessProposal(req)
-}
-
-func (m *Multiplexer) Query(ctx context.Context, req *abci.RequestQuery) (*abci.ResponseQuery, error) {
-	app, err := m.getApp()
-	if err != nil {
-		return nil, fmt.Errorf("failed to get app for version %d: %w", m.lastAppVersion, err)
-	}
-	return app.Query(ctx, req)
-}
-
-func (m *Multiplexer) VerifyVoteExtension(_ context.Context, req *abci.RequestVerifyVoteExtension) (*abci.ResponseVerifyVoteExtension, error) {
-	app, err := m.getApp()
-	if err != nil {
-		return nil, fmt.Errorf("failed to get app for version %d: %w", m.lastAppVersion, err)
-	}
-	return app.VerifyVoteExtension(req)
 }

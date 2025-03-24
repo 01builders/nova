@@ -87,8 +87,8 @@ func start(versions abci.Versions, svrCtx *server.Context, clientCtx client.Cont
 		"uses_latest_app", usesLatestApp)
 
 	// Only start the app if we need it
-	var app types.Application
-	var appCleanupFn func()
+	//var app types.Application
+	//var appCleanupFn func()
 
 	mp, err := abci.NewMultiplexer(svrCtx, appCreator, versions, state.ChainID, appVersion)
 	if err != nil {
@@ -120,14 +120,12 @@ func start(versions abci.Versions, svrCtx *server.Context, clientCtx client.Cont
 		svrCtx.Logger.Info("starting node in gRPC only mode; CometBFT is disabled")
 		svrCfg.GRPC.Enable = true
 	} else {
-		if !usesLatestApp {
-			svrCtx.Logger.Info("starting node with multiplexer")
-		} else {
-			svrCtx.Logger.Info("starting node with latest app")
-		}
-		tmNode, cleanupFn, err := startCmtNode(
-			versions, state.ChainID, appVersion, ctx, cmtCfg, app, svrCtx, usesLatestApp,
-		)
+		//if !usesLatestApp {
+		//	svrCtx.Logger.Info("starting node with multiplexer")
+		//} else {
+		//	svrCtx.Logger.Info("starting node with latest app")
+		//}
+		tmNode, cleanupFn, err := mp.StartCmtNode(ctx, cmtCfg)
 		if err != nil {
 			return err
 		}
