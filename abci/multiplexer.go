@@ -147,7 +147,7 @@ func (m *Multiplexer) getApp() (servertypes.ABCI, error) {
 	}
 
 	// check if we need to start the app or if we have a different app running
-	if !m.appVersionChangedButShouldStillCommit && (!m.started || currentVersion.AppVersion != m.activeVersion.AppVersion) {
+	if !m.appVersionChangedButShouldStillCommit && (!m.started || currentVersion.AppVersion > m.activeVersion.AppVersion) {
 		if currentVersion.Appd == nil {
 			return nil, fmt.Errorf("appd is nil for version %d", m.activeVersion.AppVersion)
 		}
@@ -284,7 +284,8 @@ func (m *Multiplexer) FinalizeBlock(_ context.Context, req *abci.RequestFinalize
 	// update the app version
 	m.lastAppVersion = resp.ConsensusParamUpdates.GetVersion().App
 
-	if m.lastAppVersion != m.activeVersion.AppVersion {
+	// app version has changed
+	if m.lastAppVersion > m.activeVersion.AppVersion {
 		m.appVersionChangedButShouldStillCommit = true
 	}
 
