@@ -50,23 +50,26 @@ type Multiplexer struct {
 	logger log.Logger
 	mu     sync.Mutex
 
-	svrCtx *server.Context
-	svrCfg serverconfig.Config
-	cmtCfg *cmtcfg.Config
+	svrCtx        *server.Context
+	svrCfg        serverconfig.Config
+	cmtCfg        *cmtcfg.Config
+	clientContext client.Context
 
 	lastAppVersion uint64
-	started        bool
 
+	started       bool
 	appCreator    servertypes.AppCreator
-	latestApp     servertypes.ABCI
+	latestApp     servertypes.Application
 	activeVersion Version
 	chainID       string
-	tmNode        *node.Node
 
-	versions      Versions
-	conn          *grpc.ClientConn
-	cleanupFns    []func() error
-	clientContext client.Context
+	tmNode     *node.Node
+	versions   Versions
+	conn       *grpc.ClientConn
+	cleanupFns []func() error
+
+	ctx context.Context
+	g   *errgroup.Group
 }
 
 // NewVersions returns a list of versions sorted by app version.
@@ -111,7 +114,7 @@ func (m *Multiplexer) registerCleanupFn(cleanUpFn func() error) {
 }
 
 func (m *Multiplexer) Start() error {
-	g, ctx := getCtx(m.svrCtx, true)
+	m.g, m.ctx = getCtx(m.svrCtx, true)
 
 	emitServerInfoMetrics()
 
@@ -120,37 +123,52 @@ func (m *Multiplexer) Start() error {
 		return err
 	}
 
-	if !m.isGrpcOnly() {
-		m.logger.Info("starting comet node")
-		if m.tmNode == nil { // TODO: filthy hack
-			if err := m.startCmtNode(ctx); err != nil {
+	if m.isGrpcOnly() {
+		m.logger.Info("starting node in gRPC only mode; CometBFT is disabled")
+		m.svrCfg.GRPC.Enable = true
+	} else {
+		if m.tmNode == nil {
+			m.logger.Info("starting comet node")
+			if err := m.startCmtNode(); err != nil {
 				return err
 			}
-			m.logger.Info("comet node started successfully")
 		}
-	} else {
-		m.logger.Info("starting node in gRPC only mode; CometBFT is disabled")
-		m.svrCfg.GRPC.Enable = true // TODO: this shouldn't be required?
 	}
 
-	app, ok := m.latestApp.(servertypes.Application)
-	if !ok {
-		m.logger.Info("using embedded app")
+	if m.latestApp == nil {
+		m.logger.Info("using embedded app, not continuing with grpc or api servers")
+		return m.g.Wait()
 	}
 
-	// startGRPC the grpc server in the case of a native app. If using an embedded app
+	if err := m.enableGRPCAndAPIServers(m.latestApp); err != nil {
+		return err
+	}
+
+	// wait for signal capture and gracefully return
+	// we are guaranteed to be waiting for the "ListenForQuitSignals" goroutine.
+	return m.g.Wait()
+}
+
+// enableGRPCAndAPIServers enables the gRPC and API servers for the provided application if configured to do so.
+// It registers transaction, Tendermint, and node services, and starts the gRPC and API servers if enabled.
+func (m *Multiplexer) enableGRPCAndAPIServers(app servertypes.Application) error {
+	if app == nil {
+		return fmt.Errorf("unable to enable grpc and api servers, app is nil")
+	}
+	// if we are running natively and have specified to enable gRPC or API servers
+	// we need to register the relevant services.
+	if m.svrCfg.API.Enable || m.svrCfg.GRPC.Enable {
+		m.logger.Debug("registering services and local comet client")
+		m.clientContext = m.clientContext.WithClient(local.New(m.tmNode))
+		app.RegisterTxService(m.clientContext)
+		app.RegisterTendermintService(m.clientContext)
+		app.RegisterNodeService(m.clientContext, m.svrCfg)
+	}
+
+	// startGRPCServer the grpc server in the case of a native app. If using an embedded app
 	// it will use that instead.
 	if m.svrCfg.GRPC.Enable {
-		if m.svrCfg.API.Enable || m.svrCfg.GRPC.Enable {
-			// Re-assign for making the client available below do not use := to avoid
-			// shadowing the clientCtx variable.
-			m.clientContext = m.clientContext.WithClient(local.New(m.tmNode))
-			app.RegisterTxService(m.clientContext)
-			app.RegisterTendermintService(m.clientContext)
-			app.RegisterNodeService(m.clientContext, m.svrCfg)
-		}
-
-		grpcServer, clientContext, err := m.startGRPCServer(ctx, g, m.svrCfg.GRPC, m.clientContext)
+		grpcServer, clientContext, err := m.startGRPCServer(m.ctx, m.g, m.svrCfg.GRPC, m.clientContext)
 		if err != nil {
 			return err
 		}
@@ -164,14 +182,12 @@ func (m *Multiplexer) Start() error {
 				return err
 			}
 
-			if err := m.startAPIServer(ctx, g, m.cmtCfg.RootDir, grpcServer, metrics); err != nil {
+			if err := m.startAPIServer(m.ctx, m.g, m.cmtCfg.RootDir, grpcServer, metrics); err != nil {
 				return err
 			}
 		}
-
 	}
-
-	return g.Wait()
+	return nil
 }
 
 // startApp starts either the native app, or an embedded app.
@@ -181,7 +197,7 @@ func (m *Multiplexer) startApp() error {
 	if err != nil && errors.Is(err, ErrNoVersionFound) {
 		// no version found, assume latest
 		m.logger.Info("starting native app", "app_version", m.lastAppVersion)
-		if err := m.startNativeApp(); err != nil {
+		if _, err := m.startNativeApp(); err != nil {
 			return fmt.Errorf("failed to start native app: %w", err)
 		}
 		return nil
@@ -280,13 +296,7 @@ func (m *Multiplexer) startGRPCServer(ctx context.Context, g *errgroup.Group, co
 	clientCtx = clientCtx.WithGRPCClient(grpcClient)
 	m.logger.Debug("gRPC client assigned to client context", "target", config.Address)
 
-	app, ok := m.latestApp.(servertypes.Application)
-	if !ok {
-		// should never happen as we only want to start a new grpc server if we're using the latest app.
-		return nil, clientCtx, fmt.Errorf("latest app is not an application")
-	}
-
-	grpcSrv, err := servergrpc.NewGRPCServer(clientCtx, app, config)
+	grpcSrv, err := servergrpc.NewGRPCServer(clientCtx, m.latestApp, config)
 	if err != nil {
 		return nil, clientCtx, err
 	}
@@ -301,18 +311,16 @@ func (m *Multiplexer) startGRPCServer(ctx context.Context, g *errgroup.Group, co
 	return grpcSrv, clientCtx, nil
 }
 
+// startAPIServer initializes and starts the API server, setting up routes, telemetry, and running it within an error group.
 func (m *Multiplexer) startAPIServer(ctx context.Context, g *errgroup.Group, home string, grpcSrv *grpc.Server, metrics *telemetry.Metrics) error {
-
-	app, ok := m.latestApp.(servertypes.Application)
-	if !ok {
-		// should never happen
-		return fmt.Errorf("latest app is not a valid application type")
+	if m.latestApp == nil {
+		return fmt.Errorf("unable to start api server, app is nil")
 	}
 
 	m.clientContext = m.clientContext.WithHomeDir(home)
 
 	apiSrv := api.New(m.clientContext, m.svrCtx.Logger.With(log.ModuleKey, "api-server"), grpcSrv)
-	app.RegisterAPIRoutes(apiSrv, m.svrCfg.API)
+	m.latestApp.RegisterAPIRoutes(apiSrv, m.svrCfg.API)
 
 	if m.svrCfg.Telemetry.Enabled {
 		apiSrv.SetTelemetry(metrics)
@@ -325,10 +333,10 @@ func (m *Multiplexer) startAPIServer(ctx context.Context, g *errgroup.Group, hom
 }
 
 // startNativeApp starts a native app.
-func (m *Multiplexer) startNativeApp() error {
+func (m *Multiplexer) startNativeApp() (servertypes.Application, error) {
 	traceWriter, traceCleanupFn, err := setupTraceWriter(m.svrCtx)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	m.registerCleanupFn(func() error {
 		traceCleanupFn()
@@ -338,18 +346,17 @@ func (m *Multiplexer) startNativeApp() error {
 	home := m.svrCtx.Config.RootDir
 	db, err := openDB(home, server.GetAppDBBackend(m.svrCtx.Viper))
 	if err != nil {
-		return err
+		return nil, err
 	}
 
-	app := m.appCreator(m.logger, db, traceWriter, m.svrCtx.Viper)
-	m.latestApp = app
+	m.latestApp = m.appCreator(m.logger, db, traceWriter, m.svrCtx.Viper)
 	m.started = true
 
 	m.registerCleanupFn(func() error {
-		return app.Close()
+		return m.latestApp.Close()
 	})
 
-	return nil
+	return m.latestApp, nil
 }
 
 func setupTraceWriter(svrCtx *server.Context) (traceWriter io.WriteCloser, cleanup func(), err error) {
@@ -400,17 +407,25 @@ func (m *Multiplexer) getApp() (servertypes.ABCI, error) {
 	if err != nil {
 		// if we are switching from an embedded binary to a native one, we need to ensure that we stop it
 		// before we start the native app.
-		if err := m.StopActiveVersion(); err != nil {
+		if err := m.stopActiveVersion(); err != nil {
 			return nil, fmt.Errorf("failed to stop active version: %w", err)
 		}
 
-		m.logger.Info("No app found in multiplexer for app version; using latest app", "app_version", m.lastAppVersion, "err", err)
 		if !m.started {
-			m.logger.Info("starting latest app")
-			if err := m.Start(); err != nil {
+			m.logger.Info("no app found in multiplexer for app version, starting latest app", "app_version", m.lastAppVersion)
+			app, err := m.startNativeApp()
+			if err != nil {
 				return nil, fmt.Errorf("failed to start latest app: %w", err)
 			}
+
+			// NOTE: we don't need to create a comet node as that will have been created when Start was called.
+
+			if err := m.enableGRPCAndAPIServers(app); err != nil {
+				return nil, fmt.Errorf("failed to enable gRPC and API servers: %w", err)
+			}
 		}
+
+		m.logger.Info("using latest app", "app_version", m.lastAppVersion)
 		return m.latestApp, nil
 	}
 
@@ -441,7 +456,7 @@ func (m *Multiplexer) startEmbeddedApp(version Version) error {
 	}
 
 	// stop the existing app version if one is currently running.
-	if err := m.StopActiveVersion(); err != nil {
+	if err := m.stopActiveVersion(); err != nil {
 		return fmt.Errorf("failed to stop active version: %w", err)
 	}
 
@@ -449,7 +464,7 @@ func (m *Multiplexer) startEmbeddedApp(version Version) error {
 		for _, preHandler := range version.PreHandlers {
 			preCmd := version.Appd.CreateExecCommand(preHandler)
 			if err := preCmd.Run(); err != nil {
-				m.logger.Info("Warning: PreHandler failed", "err", err)
+				m.logger.Warn("PreHandler failed, continuing without successful PreHandler", "err", err)
 				// Continue anyway as the pre-handler might be optional
 			}
 		}
@@ -460,7 +475,7 @@ func (m *Multiplexer) startEmbeddedApp(version Version) error {
 			programArgs = os.Args[2:] // Remove 'appd start' args
 		}
 
-		m.logger.Info("Starting app for version", "app_version", version.AppVersion, "args", programArgs)
+		m.logger.Info("Starting app for version", "app_version", version.AppVersion, "args", version.GetStartArgs(programArgs))
 		if err := version.Appd.Start(version.GetStartArgs(programArgs)...); err != nil {
 			return fmt.Errorf("failed to start app for version %d: %w", m.lastAppVersion, err)
 		}
@@ -480,10 +495,10 @@ func (m *Multiplexer) embeddedVersionRunning() bool {
 	return m.activeVersion.Appd != nil && m.activeVersion.Appd.Pid() != appd.AppdStopped
 }
 
-// StopActiveVersion stops any embedded app versions if they are currently running.
-func (m *Multiplexer) StopActiveVersion() error {
+// stopActiveVersion stops any embedded app versions if they are currently running.
+func (m *Multiplexer) stopActiveVersion() error {
 	if m.embeddedVersionRunning() {
-		m.logger.Info("Stopping app for version", "active_app_version", m.activeVersion.AppVersion)
+		m.logger.Info("stopping app for version", "active_app_version", m.activeVersion.AppVersion)
 		if err := m.activeVersion.Appd.Stop(); err != nil {
 			return fmt.Errorf("failed to stop app for version %d: %w", m.activeVersion.AppVersion, err)
 		}
@@ -503,7 +518,7 @@ func (m *Multiplexer) Cleanup() error {
 	var errs error
 
 	// stop any running app
-	if err := m.StopActiveVersion(); err != nil {
+	if err := m.stopActiveVersion(); err != nil {
 		errs = errors.Join(errs, fmt.Errorf("failed to stop active version: %w", err))
 	}
 
@@ -525,7 +540,7 @@ func (m *Multiplexer) Cleanup() error {
 }
 
 // startCmtNode initializes and starts a CometBFT node, sets up cleanup tasks, and assigns it to the Multiplexer instance.
-func (m *Multiplexer) startCmtNode(ctx context.Context) error {
+func (m *Multiplexer) startCmtNode() error {
 	cfg := m.svrCtx.Config
 	nodeKey, err := p2p.LoadOrGenNodeKey(cfg.NodeKeyFile())
 	if err != nil {
@@ -534,12 +549,12 @@ func (m *Multiplexer) startCmtNode(ctx context.Context) error {
 
 	// no latest app set means an embedded app is being used.
 	if m.latestApp == nil {
-		m.logger.Debug("registering remote app cleanup")
+		m.logger.Debug("using embedded app so registering remote app cleanup")
 		m.setupRemoteAppCleanup(m.Cleanup)
 	}
 
 	tmNode, err := node.NewNodeWithContext(
-		ctx,
+		m.ctx,
 		cfg,
 		pvm.LoadOrGenFilePV(cfg.PrivValidatorKeyFile(), cfg.PrivValidatorStateFile()),
 		nodeKey,
