@@ -86,23 +86,21 @@ func start(versions abci.Versions, svrCtx *server.Context, clientCtx client.Cont
 		"chain_id", state.ChainID,
 		"uses_latest_app", usesLatestApp)
 
-	// Only start the app if we need it
-	//var app types.Application
-	//var appCleanupFn func()
-
 	mp, err := abci.NewMultiplexer(svrCtx, appCreator, versions, state.ChainID, appVersion)
 	if err != nil {
 		return err
 	}
-	//
-	//if usesLatestApp {
-	//	app, appCleanupFn, err = startApp(svrCtx, appCreator)
-	//	if err != nil {
-	//		return err
-	//	}
-	//
-	//	defer appCleanupFn()
-	//}
+
+	defer func() {
+		if err := mp.Cleanup(); err != nil {
+			svrCtx.Logger.Error("failed to cleanup multiplexer", "err", err)
+		}
+	}()
+
+	// StartApp will either start the latest app natively, or an embedded app if one is specified.
+	if err := mp.StartApp(); err != nil {
+		return fmt.Errorf("failed to start app: %w", err)
+	}
 
 	metrics, err := startTelemetry(svrCfg)
 	if err != nil {
@@ -125,11 +123,10 @@ func start(versions abci.Versions, svrCtx *server.Context, clientCtx client.Cont
 		//} else {
 		//	svrCtx.Logger.Info("starting node with latest app")
 		//}
-		tmNode, cleanupFn, err := mp.StartCmtNode(ctx, cmtCfg)
+		tmNode, err := mp.StartCmtNode(ctx, cmtCfg)
 		if err != nil {
 			return err
 		}
-		defer cleanupFn()
 
 		if !usesLatestApp { // latestApp isn't used, use servers from remote app
 			return g.Wait()
@@ -179,65 +176,6 @@ func getState(cfg *cmtcfg.Config) (state.State, error) {
 	return s, nil
 }
 
-func startCmtNode(
-	versions abci.Versions,
-	chainID string,
-	applicationVersion uint64,
-	ctx context.Context,
-	cfg *cmtcfg.Config,
-	app types.Application,
-	svrCtx *server.Context,
-	isLatestApp bool,
-) (tmNode *node.Node, cleanupFn func(), err error) {
-	nodeKey, err := p2p.LoadOrGenNodeKey(cfg.NodeKeyFile())
-	if err != nil {
-		return nil, cleanupFn, err
-	}
-
-	clientCreator, multiplexerCleanup, err := abci.NewMultiplexer(
-		svrCtx,
-		versions,
-		chainID,
-		applicationVersion,
-	)
-	if err != nil {
-		return nil, cleanupFn, err
-	}
-
-	if !isLatestApp {
-		// Register cleanup handler for remote apps
-		setupRemoteAppCleanup(svrCtx, multiplexerCleanup)
-	}
-	tmNode, err = node.NewNodeWithContext(
-		ctx,
-		cfg,
-		pvm.LoadOrGenFilePV(cfg.PrivValidatorKeyFile(), cfg.PrivValidatorStateFile()),
-		nodeKey,
-		clientCreator,
-		getGenDocProvider(cfg),
-		cmtcfg.DefaultDBProvider,
-		node.DefaultMetricsProvider(cfg.Instrumentation),
-		servercmtlog.CometLoggerWrapper{Logger: svrCtx.Logger},
-	)
-	if err != nil {
-		return tmNode, cleanupFn, err
-	}
-
-	if err := tmNode.Start(); err != nil {
-		return tmNode, cleanupFn, err
-	}
-
-	cleanupFn = func() {
-		if tmNode != nil && tmNode.IsRunning() {
-			_ = tmNode.Stop()
-		}
-
-		_ = multiplexerCleanup()
-	}
-
-	return tmNode, cleanupFn, nil
-}
-
 // setupRemoteAppCleanup ensures that remote app processes are terminated when the main process receives termination signals
 func setupRemoteAppCleanup(svrCtx *server.Context, cleanupFn func() error) {
 	sigCh := make(chan os.Signal, 1)
@@ -281,28 +219,6 @@ func getGenDocProvider(cfg *cmtcfg.Config) func() (*cmttypes.GenesisDoc, error) 
 
 		return appGenesis.ToGenesisDoc()
 	}
-}
-
-func setupTraceWriter(svrCtx *server.Context) (traceWriter io.WriteCloser, cleanup func(), err error) {
-	// clean up the traceWriter when the server is shutting down
-	cleanup = func() {}
-
-	traceWriterFile := svrCtx.Viper.GetString(flagTraceStore)
-	traceWriter, err = openTraceWriter(traceWriterFile)
-	if err != nil {
-		return traceWriter, cleanup, err
-	}
-
-	// if flagTraceStore is not used then traceWriter is nil
-	if traceWriter != nil {
-		cleanup = func() {
-			if err = traceWriter.Close(); err != nil {
-				svrCtx.Logger.Error("failed to close trace writer", "err", err)
-			}
-		}
-	}
-
-	return traceWriter, cleanup, nil
 }
 
 func startGrpcServer(
@@ -423,44 +339,6 @@ func getCtx(svrCtx *server.Context, block bool) (*errgroup.Group, context.Contex
 	return g, ctx
 }
 
-func startApp(svrCtx *server.Context, appCreator types.AppCreator) (app types.Application, cleanupFn func(), err error) {
-	traceWriter, traceCleanupFn, err := setupTraceWriter(svrCtx)
-	if err != nil {
-		return app, traceCleanupFn, err
-	}
-
-	home := svrCtx.Config.RootDir
-	db, err := openDB(home, server.GetAppDBBackend(svrCtx.Viper))
-	if err != nil {
-		return app, traceCleanupFn, err
-	}
-
-	app = appCreator(svrCtx.Logger, db, traceWriter, svrCtx.Viper)
-	cleanupFn = func() {
-		traceCleanupFn()
-		if localErr := app.Close(); localErr != nil {
-			svrCtx.Logger.Error(localErr.Error())
-		}
-	}
-	return app, cleanupFn, nil
-}
-
-func openDB(rootDir string, backendType db.BackendType) (db.DB, error) {
-	dataDir := filepath.Join(rootDir, "data")
-	return db.NewDB("application", backendType, dataDir)
-}
-
 func openDBM(cfg *cmtcfg.Config) (dbm.DB, error) {
 	return dbm.NewDB("state", dbm.BackendType(cfg.DBBackend), cfg.DBDir())
-}
-
-func openTraceWriter(traceWriterFile string) (w io.WriteCloser, err error) {
-	if traceWriterFile == "" {
-		return
-	}
-	return os.OpenFile(
-		traceWriterFile,
-		os.O_WRONLY|os.O_APPEND|os.O_CREATE,
-		0o666,
-	)
 }

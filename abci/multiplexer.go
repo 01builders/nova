@@ -8,6 +8,7 @@ import (
 	"github.com/cometbft/cometbft/node"
 	"github.com/cometbft/cometbft/p2p"
 	pvm "github.com/cometbft/cometbft/privval"
+	"github.com/cometbft/cometbft/proxy"
 	cmttypes "github.com/cometbft/cometbft/types"
 	db "github.com/cosmos/cosmos-db"
 	"github.com/cosmos/cosmos-sdk/server"
@@ -363,10 +364,10 @@ func (m *Multiplexer) Cleanup() error {
 func (m *Multiplexer) StartCmtNode(
 	ctx context.Context,
 	cfg *cmtcfg.Config,
-) (tmNode *node.Node, cleanupFn func(), err error) {
+) (tmNode *node.Node, err error) {
 	nodeKey, err := p2p.LoadOrGenNodeKey(cfg.NodeKeyFile())
 	if err != nil {
-		return nil, cleanupFn, err
+		return nil, err
 	}
 
 	//if !isLatestApp {
@@ -374,14 +375,12 @@ func (m *Multiplexer) StartCmtNode(
 	//m.setupRemoteAppCleanup(m.Cleanup) // TODO: this doesn't make sense atm
 	//}
 
-	// TODO: provide a client creator
-
 	tmNode, err = node.NewNodeWithContext(
 		ctx,
 		cfg,
 		pvm.LoadOrGenFilePV(cfg.PrivValidatorKeyFile(), cfg.PrivValidatorStateFile()),
 		nodeKey,
-		clientCreator,
+		proxy.NewConnSyncLocalClientCreator(m),
 		getGenDocProvider(cfg),
 		cmtcfg.DefaultDBProvider,
 		node.DefaultMetricsProvider(cfg.Instrumentation),
@@ -389,11 +388,11 @@ func (m *Multiplexer) StartCmtNode(
 	)
 
 	if err != nil {
-		return tmNode, cleanupFn, err
+		return tmNode, err
 	}
 
 	if err := tmNode.Start(); err != nil {
-		return tmNode, cleanupFn, err
+		return tmNode, err
 	}
 
 	m.registerCleanupFn(func() error {
@@ -403,7 +402,7 @@ func (m *Multiplexer) StartCmtNode(
 		return nil
 	})
 
-	return tmNode, cleanupFn, nil
+	return tmNode, nil
 }
 
 // setupRemoteAppCleanup ensures that remote app processes are terminated when the main process receives termination signals
