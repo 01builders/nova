@@ -34,6 +34,11 @@ type Multiplexer struct {
 
 	versions Versions
 	conn     *grpc.ClientConn
+
+	// appVersionChangedButShouldStillCommit is set to true if the app version
+	// changed during the finalize block phase. This is used to ensure that the
+	// commit phase is executed with the correct app version.
+	appVersionChangedButShouldStillCommit bool
 }
 
 // NewVersions returns a list of versions sorted by app version.
@@ -142,7 +147,7 @@ func (m *Multiplexer) getApp() (servertypes.ABCI, error) {
 	}
 
 	// check if we need to start the app or if we have a different app running
-	if !m.started || currentVersion.AppVersion != m.activeVersion.AppVersion {
+	if !m.appVersionChangedButShouldStillCommit && (!m.started || currentVersion.AppVersion > m.activeVersion.AppVersion) {
 		if currentVersion.Appd == nil {
 			return nil, fmt.Errorf("appd is nil for version %d", m.activeVersion.AppVersion)
 		}
@@ -187,16 +192,16 @@ func (m *Multiplexer) getApp() (servertypes.ABCI, error) {
 		}
 	}
 
-	m.logger.Info("Using ABCI remote connection", "maximum_app_version", currentVersion.AppVersion, "abci_version", currentVersion.ABCIVersion.String(), "chain_id", m.chainID)
+	m.logger.Info("Using ABCI remote connection", "maximum_app_version", m.activeVersion.AppVersion, "abci_version", m.activeVersion.ABCIVersion.String(), "chain_id", m.chainID)
 
-	switch currentVersion.ABCIVersion {
+	switch m.activeVersion.ABCIVersion {
 	case ABCIClientVersion1:
 		return NewRemoteABCIClientV1(m.conn, m.chainID), nil
 	case ABCIClientVersion2:
 		return NewRemoteABCIClientV2(m.conn), nil
 	}
 
-	return nil, fmt.Errorf("unknown ABCI client version %d", currentVersion.ABCIVersion)
+	return nil, fmt.Errorf("unknown ABCI client version %d", m.activeVersion.ABCIVersion)
 }
 
 // Cleanup allows proper multiplexer termination.
@@ -240,6 +245,7 @@ func (m *Multiplexer) CheckTx(_ context.Context, req *abci.RequestCheckTx) (*abc
 	if err != nil {
 		return nil, fmt.Errorf("failed to get app for version %d: %w", m.lastAppVersion, err)
 	}
+
 	return app.CheckTx(req)
 }
 
@@ -248,6 +254,11 @@ func (m *Multiplexer) Commit(context.Context, *abci.RequestCommit) (*abci.Respon
 	if err != nil {
 		return nil, fmt.Errorf("failed to get app for version %d: %w", m.lastAppVersion, err)
 	}
+
+	if m.appVersionChangedButShouldStillCommit {
+		m.appVersionChangedButShouldStillCommit = false
+	}
+
 	return app.Commit()
 }
 
@@ -272,6 +283,11 @@ func (m *Multiplexer) FinalizeBlock(_ context.Context, req *abci.RequestFinalize
 
 	// update the app version
 	m.lastAppVersion = resp.ConsensusParamUpdates.GetVersion().App
+
+	// app version has changed
+	if m.lastAppVersion > m.activeVersion.AppVersion {
+		m.appVersionChangedButShouldStillCommit = true
+	}
 
 	return resp, err
 }
