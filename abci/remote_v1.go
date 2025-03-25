@@ -99,13 +99,19 @@ func (a *RemoteABCIClientV1) FinalizeBlock(req *abciv2.RequestFinalizeBlock) (*a
 		appVersion = infoResp.AppVersion
 	}
 
-	lastBlockId := typesv1.BlockID{
-		Hash: req.Header.LastBlockId.Hash,
-		PartSetHeader: typesv1.PartSetHeader{
+	lastBlockId := typesv1.BlockID{}
+
+	if req.Header.LastBlockId.Hash != nil {
+		lastBlockId.Hash = req.Header.LastBlockId.Hash
+	}
+	if req.Header.LastBlockId.PartSetHeader.Hash != nil {
+		lastBlockId.PartSetHeader = typesv1.PartSetHeader{
 			Total: req.Header.LastBlockId.PartSetHeader.Total,
 			Hash:  req.Header.LastBlockId.PartSetHeader.Hash,
-		},
+		}
 	}
+
+	commitInfo := commitInfoV2ToV1(&req.DecidedLastCommit)
 
 	beginBlockResp, err := a.ABCIApplicationClient.BeginBlock(context.Background(), &abciv1.RequestBeginBlock{
 		Hash: req.Hash,
@@ -119,16 +125,18 @@ func (a *RemoteABCIClientV1) FinalizeBlock(req *abciv2.RequestFinalizeBlock) (*a
 			Time:               req.Time,
 			NextValidatorsHash: req.NextValidatorsHash,
 			ProposerAddress:    req.ProposerAddress,
-			DataHash:           req.Header.DataHash,
 			LastBlockId:        lastBlockId,
-			LastResultsHash:    req.Header.LastResultsHash,
-			LastCommitHash:     req.Header.LastCommitHash,
-			ValidatorsHash:     req.Header.ValidatorsHash,
-			ConsensusHash:      req.Header.ConsensusHash,
-			AppHash:            req.Header.AppHash,
-			EvidenceHash:       req.Header.EvidenceHash,
+
+			// needed for v3 sync
+			DataHash:        req.Header.DataHash,
+			LastResultsHash: req.Header.LastResultsHash,
+			LastCommitHash:  req.Header.LastCommitHash,
+			ValidatorsHash:  req.Header.ValidatorsHash,
+			ConsensusHash:   req.Header.ConsensusHash,
+			AppHash:         req.Header.AppHash,
+			EvidenceHash:    req.Header.EvidenceHash,
 		},
-		LastCommitInfo:      commitInfoV2ToV1(&req.DecidedLastCommit),
+		LastCommitInfo:      commitInfo,
 		ByzantineValidators: evidenceV2ToV1(req.Misbehavior),
 	}, grpc.WaitForReady(true))
 	if err != nil {
@@ -580,7 +588,7 @@ func commitInfoV2ToV1(info *abciv2.CommitInfo) abciv1.LastCommitInfo {
 				Address: vote.Validator.Address,
 				Power:   vote.Validator.Power,
 			},
-			SignedLastBlock: vote.BlockIdFlag == typesv2.BlockIDFlagCommit,
+			SignedLastBlock: vote.BlockIdFlag != typesv2.BlockIDFlagAbsent,
 		})
 	}
 	return abciv1.LastCommitInfo{
