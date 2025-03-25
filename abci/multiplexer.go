@@ -124,6 +124,7 @@ func (m *Multiplexer) isNativeApp() bool {
 	return m.nativeApp != nil
 }
 
+// isEmbeddedApp checks if an embedded application is currently running.
 func (m *Multiplexer) isEmbeddedApp() bool {
 	return !m.isNativeApp()
 }
