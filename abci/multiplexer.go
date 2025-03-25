@@ -50,26 +50,38 @@ type Multiplexer struct {
 	logger log.Logger
 	mu     sync.Mutex
 
-	svrCtx        *server.Context
-	svrCfg        serverconfig.Config
+	svrCtx *server.Context
+	svrCfg serverconfig.Config
+	// clientContext is used to configure the different services managed by the multiplexer.
 	clientContext client.Context
-
+	// lastAppVersion is the version number of the last application that has been used.
+	// this is updated based on the consensus params in FinalizeBlock.
 	lastAppVersion uint64
-
-	started       bool
-	appCreator    servertypes.AppCreator
-	nativeApp     servertypes.Application
+	// started indicates if there is either an embedded app running, or a native one running.
+	started bool
+	// appCreator is a function type responsible for creating a new application instance.
+	appCreator servertypes.AppCreator
+	// nativeApp represents the instance of a native application.
+	// the multiplexer either uses this instance, or the version set in activeVersion.
+	nativeApp servertypes.Application
+	// activeVersion is the currently active embedded version that is running.
 	activeVersion Version
-	chainID       string
-
-	tmNode     *node.Node
-	versions   Versions
-	conn       *grpc.ClientConn
+	// chainID is required as it needs to be propagated to the ABCI V1 connection.
+	chainID string
+	// cmNode is the comet node which has been created. A reference is required in order to establish
+	// a local connection to it.
+	cmNode *node.Node
+	// versions is a list of versions which contain all embedded binaries.
+	versions Versions
+	// conn is a grpc client connection and used when creating remote ABCI connections.
+	conn *grpc.ClientConn
+	// cleanupFns is a list of functions which should execute upon cleanup of the multiplexer.
+	// any returned errors are logged.
 	cleanupFns []func() error
-
+	// ctx is the context which is passed to the comet, grpc and api server starting functions.
 	ctx context.Context
-	g   *errgroup.Group
-
+	// g is the waitgroup to which the comet, grpc and api server init functions are added to.
+	g *errgroup.Group
 	// appVersionChangedButShouldStillCommit is set to true if the app version
 	// changed during the finalize block phase. This is used to ensure that the
 	// commit phase is executed with the correct app version.
@@ -131,7 +143,7 @@ func (m *Multiplexer) Start() error {
 		m.logger.Info("starting node in gRPC only mode; CometBFT is disabled")
 		m.svrCfg.GRPC.Enable = true
 	} else {
-		if m.tmNode == nil {
+		if m.cmNode == nil {
 			m.logger.Info("starting comet node")
 			if err := m.startCmtNode(); err != nil {
 				return err
@@ -163,7 +175,7 @@ func (m *Multiplexer) enableGRPCAndAPIServers(app servertypes.Application) error
 	// we need to register the relevant services.
 	if m.svrCfg.API.Enable || m.svrCfg.GRPC.Enable {
 		m.logger.Info("registering services and local comet client")
-		m.clientContext = m.clientContext.WithClient(local.New(m.tmNode))
+		m.clientContext = m.clientContext.WithClient(local.New(m.cmNode))
 		app.RegisterTxService(m.clientContext)
 		app.RegisterTendermintService(m.clientContext)
 		app.RegisterNodeService(m.clientContext, m.svrCfg)
@@ -590,7 +602,7 @@ func (m *Multiplexer) startCmtNode() error {
 		return nil
 	})
 
-	m.tmNode = tmNode
+	m.cmNode = tmNode
 	return nil
 }
 
