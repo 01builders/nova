@@ -2,6 +2,7 @@ package abci
 
 import (
 	"context"
+	"fmt"
 	"math"
 
 	"google.golang.org/grpc"
@@ -99,17 +100,34 @@ func (a *RemoteABCIClientV1) FinalizeBlock(req *abciv2.RequestFinalizeBlock) (*a
 		appVersion = infoResp.AppVersion
 	}
 
+	lastBlockId := typesv1.BlockID{
+		Hash: req.Header.LastBlockId.Hash,
+		PartSetHeader: typesv1.PartSetHeader{
+			Total: req.Header.LastBlockId.PartSetHeader.Total,
+			Hash:  req.Header.LastBlockId.PartSetHeader.Hash,
+		},
+	}
+
 	beginBlockResp, err := a.ABCIApplicationClient.BeginBlock(context.Background(), &abciv1.RequestBeginBlock{
 		Hash: req.Hash,
 		Header: typesv1.Header{
 			ChainID: a.chainID,
 			Version: versionv1.Consensus{
-				App: appVersion,
+				Block: 11,
+				App:   appVersion,
 			},
 			Height:             req.Height,
 			Time:               req.Time,
 			NextValidatorsHash: req.NextValidatorsHash,
 			ProposerAddress:    req.ProposerAddress,
+			DataHash:           req.Header.DataHash,
+			LastBlockId:        lastBlockId,
+			LastResultsHash:    req.Header.LastResultsHash,
+			LastCommitHash:     req.Header.LastCommitHash,
+			ValidatorsHash:     req.Header.ValidatorsHash,
+			ConsensusHash:      req.Header.ConsensusHash,
+			AppHash:            req.Header.AppHash,
+			EvidenceHash:       req.Header.EvidenceHash,
 		},
 		LastCommitInfo:      commitInfoV2ToV1(&req.DecidedLastCommit),
 		ByzantineValidators: evidenceV2ToV1(req.Misbehavior),
@@ -169,6 +187,13 @@ func (a *RemoteABCIClientV1) FinalizeBlock(req *abciv2.RequestFinalizeBlock) (*a
 	if err != nil {
 		return nil, err
 	}
+
+	fmt.Println(`commitResp
+	
+	
+	
+	
+	`, commitResp, "appHash", string(commitResp.Data))
 
 	// set the retain height, used in commit noop
 	a.commitRetainLastHeight = commitResp.RetainHeight
@@ -339,7 +364,8 @@ func (a *RemoteABCIClientV1) ProcessProposal(req *abciv2.RequestProcessProposal)
 	resp, err := a.ABCIApplicationClient.ProcessProposal(context.Background(), &abciv1.RequestProcessProposal{
 		Header: typesv1.Header{
 			Version: versionv1.Consensus{
-				App: appVersion,
+				Block: 11,
+				App:   appVersion,
 			},
 			ChainID:            a.chainID,
 			Height:             req.Height,
@@ -536,6 +562,7 @@ func consensusParamsV2ToV1(params *typesv2.ConsensusParams) *abciv1.ConsensusPar
 		consensusParamsV1.Evidence = &typesv1.EvidenceParams{
 			MaxAgeNumBlocks: evidenceParams.MaxAgeNumBlocks,
 			MaxAgeDuration:  evidenceParams.MaxAgeDuration,
+			MaxBytes:        evidenceParams.MaxBytes,
 		}
 	}
 

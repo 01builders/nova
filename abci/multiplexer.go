@@ -138,7 +138,7 @@ func (m *Multiplexer) getApp() (servertypes.ABCI, error) {
 	if err != nil {
 		m.logger.Info("No app found in multiplexer for app version; using latest app", "app_version", m.lastAppVersion, "err", err)
 		panic("TOOD: start latest app here")
-		return m.latestApp, nil
+		// return m.latestApp, nil
 	}
 
 	// check if we need to start the app or if we have a different app running
