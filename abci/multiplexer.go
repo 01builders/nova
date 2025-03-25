@@ -46,6 +46,9 @@ const (
 	flagGRPCOnly   = "grpc-only"
 )
 
+// Multiplexer is responsible for managing multiple versions of applications and coordinating their lifecycle.
+// It handles version switching between embedded and native applications.
+// It manages configuration, connection setup, and cleanup functions for all associated services and resources.
 type Multiplexer struct {
 	logger log.Logger
 	mu     sync.Mutex
@@ -97,7 +100,7 @@ func NewVersions(v ...Version) (Versions, error) {
 	return versions.Sorted(), nil
 }
 
-// NewMultiplexer creates a new ABCI wrapper for multiplexing
+// NewMultiplexer creates a new Multiplexer.
 func NewMultiplexer(svrCtx *server.Context, svrCfg serverconfig.Config, clientCtx client.Context, appCreator servertypes.AppCreator, versions Versions, chainID string, applicationVersion uint64) (*Multiplexer, error) {
 	if err := versions.Validate(); err != nil {
 		return nil, fmt.Errorf("invalid versions: %w", err)
@@ -152,7 +155,7 @@ func (m *Multiplexer) Start() error {
 	}
 
 	if m.nativeApp == nil {
-		m.logger.Info("using embedded app, not continuing with grpc or api servers")
+		m.logger.Debug("using embedded app, not continuing with grpc or api servers")
 		return m.g.Wait()
 	}
 
@@ -174,7 +177,7 @@ func (m *Multiplexer) enableGRPCAndAPIServers(app servertypes.Application) error
 	// if we are running natively and have specified to enable gRPC or API servers
 	// we need to register the relevant services.
 	if m.svrCfg.API.Enable || m.svrCfg.GRPC.Enable {
-		m.logger.Info("registering services and local comet client")
+		m.logger.Debug("registering services and local comet client")
 		m.clientContext = m.clientContext.WithClient(local.New(m.cmNode))
 		app.RegisterTxService(m.clientContext)
 		app.RegisterTendermintService(m.clientContext)
@@ -212,7 +215,6 @@ func (m *Multiplexer) startApp() error {
 	currentVersion, err := m.versions.GetForAppVersion(m.lastAppVersion)
 	if err != nil && errors.Is(err, ErrNoVersionFound) {
 		// no version found, assume latest
-		m.logger.Info("starting native app", "app_version", m.lastAppVersion)
 		if _, err := m.startNativeApp(); err != nil {
 			return fmt.Errorf("failed to start native app: %w", err)
 		}
@@ -233,7 +235,7 @@ func (m *Multiplexer) startApp() error {
 		}
 
 		// start an embedded app.
-		m.logger.Info("starting embedded app", "app_version", currentVersion.AppVersion, "args", currentVersion.GetStartArgs(programArgs))
+		m.logger.Debug("starting embedded app", "app_version", currentVersion.AppVersion, "args", currentVersion.GetStartArgs(programArgs))
 		if err := currentVersion.Appd.Start(currentVersion.GetStartArgs(programArgs)...); err != nil {
 			return fmt.Errorf("failed to start app: %w", err)
 		}
@@ -318,9 +320,8 @@ func (m *Multiplexer) startGRPCServer() (*grpc.Server, client.Context, error) {
 
 	// Start the gRPC server in a goroutine. Note, the provided ctx will ensure
 	// that the server is gracefully shut down.
-	m.logger.Info("starting gRPC server", "address", m.svrCfg.GRPC.Address)
 	m.g.Go(func() error {
-		return servergrpc.StartGRPCServer(m.ctx, m.svrCtx.Logger.With(log.ModuleKey, "grpc-server"), m.svrCfg.GRPC, grpcSrv)
+		return servergrpc.StartGRPCServer(m.ctx, m.logger.With(log.ModuleKey, "grpc-server"), m.svrCfg.GRPC, grpcSrv)
 	})
 
 	m.conn = grpcClient
@@ -335,14 +336,14 @@ func (m *Multiplexer) startAPIServer(grpcSrv *grpc.Server, metrics *telemetry.Me
 
 	m.clientContext = m.clientContext.WithHomeDir(m.svrCtx.Config.RootDir)
 
-	apiSrv := api.New(m.clientContext, m.svrCtx.Logger.With(log.ModuleKey, "api-server"), grpcSrv)
+	apiSrv := api.New(m.clientContext, m.logger.With(log.ModuleKey, "api-server"), grpcSrv)
 	m.nativeApp.RegisterAPIRoutes(apiSrv, m.svrCfg.API)
 
 	if m.svrCfg.Telemetry.Enabled {
 		apiSrv.SetTelemetry(metrics)
 	}
 
-	m.logger.Info("starting api server")
+	m.logger.Debug("starting api server")
 	m.g.Go(func() error {
 		return apiSrv.Start(m.ctx, m.svrCfg)
 	})
@@ -366,7 +367,7 @@ func (m *Multiplexer) startNativeApp() (servertypes.Application, error) {
 		return nil, err
 	}
 
-	m.logger.Info("creating native app", "app_version", m.lastAppVersion)
+	m.logger.Debug("creating native app", "app_version", m.lastAppVersion)
 	m.nativeApp = m.appCreator(m.logger, db, traceWriter, m.svrCtx.Viper)
 	m.started = true
 
