@@ -77,7 +77,7 @@ func (m *Multiplexer) FinalizeBlock(_ context.Context, req *abci.RequestFinalize
 	if m.lastAppVersion > m.activeVersion.AppVersion {
 		m.appVersionChangedButShouldStillCommit = true
 	}
-	
+
 	return resp, err
 }
 

@@ -300,7 +300,6 @@ func (m *Multiplexer) startGRPCServer(ctx context.Context, g *errgroup.Group, co
 
 	clientCtx = clientCtx.WithGRPCClient(grpcClient)
 	m.logger.Debug("gRPC client assigned to client context", "target", config.Address)
-
 	grpcSrv, err := servergrpc.NewGRPCServer(clientCtx, m.latestApp, config)
 	if err != nil {
 		return nil, clientCtx, err
@@ -308,6 +307,7 @@ func (m *Multiplexer) startGRPCServer(ctx context.Context, g *errgroup.Group, co
 
 	// Start the gRPC server in a goroutine. Note, the provided ctx will ensure
 	// that the server is gracefully shut down.
+	m.logger.Info("starting gRPC server", "address", config.Address)
 	g.Go(func() error {
 		return servergrpc.StartGRPCServer(ctx, m.svrCtx.Logger.With(log.ModuleKey, "grpc-server"), config, grpcSrv)
 	})
@@ -331,6 +331,7 @@ func (m *Multiplexer) startAPIServer(ctx context.Context, g *errgroup.Group, hom
 		apiSrv.SetTelemetry(metrics)
 	}
 
+	m.logger.Info("starting api server")
 	g.Go(func() error {
 		return apiSrv.Start(ctx, m.svrCfg)
 	})
@@ -354,6 +355,7 @@ func (m *Multiplexer) startNativeApp() (servertypes.Application, error) {
 		return nil, err
 	}
 
+	m.logger.Info("creating native app", "app_version", m.lastAppVersion)
 	m.latestApp = m.appCreator(m.logger, db, traceWriter, m.svrCtx.Viper)
 	m.started = true
 
@@ -407,16 +409,18 @@ func (m *Multiplexer) getApp() (servertypes.ABCI, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
+	m.logger.Info("getting app", "app_version", m.lastAppVersion, "app_version_changed_but_should_still_commit", m.appVersionChangedButShouldStillCommit)
+
 	// get the appropriate version for the latest app version.
 	currentVersion, err := m.versions.GetForAppVersion(m.lastAppVersion)
-	if err != nil {
+	if !m.appVersionChangedButShouldStillCommit && err != nil {
 		// if we are switching from an embedded binary to a native one, we need to ensure that we stop it
 		// before we start the native app.
 		if err := m.stopActiveVersion(); err != nil {
 			return nil, fmt.Errorf("failed to stop active version: %w", err)
 		}
 
-		if !m.started {
+		if m.latestApp == nil {
 			m.logger.Info("no app found in multiplexer for app version, starting latest app", "app_version", m.lastAppVersion)
 			app, err := m.startNativeApp()
 			if err != nil {
@@ -435,6 +439,7 @@ func (m *Multiplexer) getApp() (servertypes.ABCI, error) {
 	}
 
 	// check if we need to start the app or if we have a different app running
+	// TODO: currentVersion can be unintialized if appVersionChangedButShouldStillCommit is true.
 	if !m.appVersionChangedButShouldStillCommit && (!m.started || currentVersion.AppVersion > m.activeVersion.AppVersion) {
 		if err := m.startEmbeddedApp(currentVersion); err != nil {
 			return nil, fmt.Errorf("failed to start embedded app: %w", err)
@@ -454,7 +459,7 @@ func (m *Multiplexer) getApp() (servertypes.ABCI, error) {
 
 // startEmbeddedApp starts an embedded version of the app.
 func (m *Multiplexer) startEmbeddedApp(version Version) error {
-	m.logger.Info("Starting embedded app", "app_version", version.AppVersion, "abci_version", version.ABCIVersion.String())
+	m.logger.Info("starting embedded app", "app_version", version.AppVersion, "abci_version", version.ABCIVersion.String())
 	if version.Appd == nil {
 		return fmt.Errorf("appd is nil for version %d", m.activeVersion.AppVersion)
 	}
