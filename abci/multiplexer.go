@@ -447,6 +447,7 @@ func (m *Multiplexer) getApp() (servertypes.ABCI, error) {
 	}
 
 	m.logger.Info("Using ABCI remote connection", "maximum_app_version", m.activeVersion.AppVersion, "abci_version", m.activeVersion.ABCIVersion.String(), "chain_id", m.chainID)
+
 	switch m.activeVersion.ABCIVersion {
 	case ABCIClientVersion1:
 		return NewRemoteABCIClientV1(m.conn, m.chainID), nil
