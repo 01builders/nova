@@ -52,7 +52,6 @@ type Multiplexer struct {
 
 	svrCtx        *server.Context
 	svrCfg        serverconfig.Config
-	cmtCfg        *cmtcfg.Config
 	clientContext client.Context
 
 	lastAppVersion uint64
@@ -163,7 +162,7 @@ func (m *Multiplexer) enableGRPCAndAPIServers(app servertypes.Application) error
 	// if we are running natively and have specified to enable gRPC or API servers
 	// we need to register the relevant services.
 	if m.svrCfg.API.Enable || m.svrCfg.GRPC.Enable {
-		m.logger.Debug("registering services and local comet client")
+		m.logger.Info("registering services and local comet client")
 		m.clientContext = m.clientContext.WithClient(local.New(m.tmNode))
 		app.RegisterTxService(m.clientContext)
 		app.RegisterTendermintService(m.clientContext)
@@ -173,7 +172,7 @@ func (m *Multiplexer) enableGRPCAndAPIServers(app servertypes.Application) error
 	// startGRPCServer the grpc server in the case of a native app. If using an embedded app
 	// it will use that instead.
 	if m.svrCfg.GRPC.Enable {
-		grpcServer, clientContext, err := m.startGRPCServer(m.ctx, m.g, m.svrCfg.GRPC, m.clientContext)
+		grpcServer, clientContext, err := m.startGRPCServer()
 		if err != nil {
 			return err
 		}
@@ -187,7 +186,7 @@ func (m *Multiplexer) enableGRPCAndAPIServers(app servertypes.Application) error
 				return err
 			}
 
-			if err := m.startAPIServer(m.ctx, m.g, m.cmtCfg.RootDir, grpcServer, metrics); err != nil {
+			if err := m.startAPIServer(grpcServer, metrics); err != nil {
 				return err
 			}
 		}
@@ -268,61 +267,61 @@ func (m *Multiplexer) initRemoteGrpcConn() error {
 }
 
 // startGRPCServer initializes and starts a gRPC server if enabled in the configuration, returning the server and updated context.
-func (m *Multiplexer) startGRPCServer(ctx context.Context, g *errgroup.Group, config serverconfig.GRPCConfig, clientCtx client.Context) (*grpc.Server, client.Context, error) {
-	_, _, err := net.SplitHostPort(config.Address)
+func (m *Multiplexer) startGRPCServer() (*grpc.Server, client.Context, error) {
+	_, _, err := net.SplitHostPort(m.svrCfg.GRPC.Address)
 	if err != nil {
-		return nil, clientCtx, err
+		return nil, m.clientContext, err
 	}
 
-	maxSendMsgSize := config.MaxSendMsgSize
+	maxSendMsgSize := m.svrCfg.GRPC.MaxSendMsgSize
 	if maxSendMsgSize == 0 {
 		maxSendMsgSize = serverconfig.DefaultGRPCMaxSendMsgSize
 	}
 
-	maxRecvMsgSize := config.MaxRecvMsgSize
+	maxRecvMsgSize := m.svrCfg.GRPC.MaxRecvMsgSize
 	if maxRecvMsgSize == 0 {
 		maxRecvMsgSize = serverconfig.DefaultGRPCMaxRecvMsgSize
 	}
 
 	// if gRPC is enabled, configure gRPC client for gRPC gateway
 	grpcClient, err := grpc.NewClient(
-		config.Address,
+		m.svrCfg.GRPC.Address,
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
 		grpc.WithDefaultCallOptions(
-			grpc.ForceCodec(codec.NewProtoCodec(clientCtx.InterfaceRegistry).GRPCCodec()),
+			grpc.ForceCodec(codec.NewProtoCodec(m.clientContext.InterfaceRegistry).GRPCCodec()),
 			grpc.MaxCallRecvMsgSize(maxRecvMsgSize),
 			grpc.MaxCallSendMsgSize(maxSendMsgSize),
 		),
 	)
 	if err != nil {
-		return nil, clientCtx, err
+		return nil, m.clientContext, err
 	}
 
-	clientCtx = clientCtx.WithGRPCClient(grpcClient)
-	m.logger.Debug("gRPC client assigned to client context", "target", config.Address)
-	grpcSrv, err := servergrpc.NewGRPCServer(clientCtx, m.latestApp, config)
+	m.clientContext = m.clientContext.WithGRPCClient(grpcClient)
+	m.logger.Debug("gRPC client assigned to client context", "target", m.svrCfg.GRPC.Address)
+	grpcSrv, err := servergrpc.NewGRPCServer(m.clientContext, m.latestApp, m.svrCfg.GRPC)
 	if err != nil {
-		return nil, clientCtx, err
+		return nil, m.clientContext, err
 	}
 
 	// Start the gRPC server in a goroutine. Note, the provided ctx will ensure
 	// that the server is gracefully shut down.
-	m.logger.Info("starting gRPC server", "address", config.Address)
-	g.Go(func() error {
-		return servergrpc.StartGRPCServer(ctx, m.svrCtx.Logger.With(log.ModuleKey, "grpc-server"), config, grpcSrv)
+	m.logger.Info("starting gRPC server", "address", m.svrCfg.GRPC.Address)
+	m.g.Go(func() error {
+		return servergrpc.StartGRPCServer(m.ctx, m.svrCtx.Logger.With(log.ModuleKey, "grpc-server"), m.svrCfg.GRPC, grpcSrv)
 	})
 
 	m.conn = grpcClient
-	return grpcSrv, clientCtx, nil
+	return grpcSrv, m.clientContext, nil
 }
 
 // startAPIServer initializes and starts the API server, setting up routes, telemetry, and running it within an error group.
-func (m *Multiplexer) startAPIServer(ctx context.Context, g *errgroup.Group, home string, grpcSrv *grpc.Server, metrics *telemetry.Metrics) error {
+func (m *Multiplexer) startAPIServer(grpcSrv *grpc.Server, metrics *telemetry.Metrics) error {
 	if m.latestApp == nil {
 		return fmt.Errorf("unable to start api server, app is nil")
 	}
 
-	m.clientContext = m.clientContext.WithHomeDir(home)
+	m.clientContext = m.clientContext.WithHomeDir(m.svrCtx.Config.RootDir)
 
 	apiSrv := api.New(m.clientContext, m.svrCtx.Logger.With(log.ModuleKey, "api-server"), grpcSrv)
 	m.latestApp.RegisterAPIRoutes(apiSrv, m.svrCfg.API)
@@ -332,8 +331,8 @@ func (m *Multiplexer) startAPIServer(ctx context.Context, g *errgroup.Group, hom
 	}
 
 	m.logger.Info("starting api server")
-	g.Go(func() error {
-		return apiSrv.Start(ctx, m.svrCfg)
+	m.g.Go(func() error {
+		return apiSrv.Start(m.ctx, m.svrCfg)
 	})
 	return nil
 }
@@ -429,6 +428,7 @@ func (m *Multiplexer) getApp() (servertypes.ABCI, error) {
 
 			// NOTE: we don't need to create a comet node as that will have been created when Start was called.
 
+			m.svrCfg.GRPC.Enable = true // TODO: cleaner way than just setting field.
 			if err := m.enableGRPCAndAPIServers(app); err != nil {
 				return nil, fmt.Errorf("failed to enable gRPC and API servers: %w", err)
 			}
