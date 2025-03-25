@@ -70,6 +70,11 @@ type Multiplexer struct {
 
 	ctx context.Context
 	g   *errgroup.Group
+
+	// appVersionChangedButShouldStillCommit is set to true if the app version
+	// changed during the finalize block phase. This is used to ensure that the
+	// commit phase is executed with the correct app version.
+	appVersionChangedButShouldStillCommit bool
 }
 
 // NewVersions returns a list of versions sorted by app version.
@@ -430,22 +435,21 @@ func (m *Multiplexer) getApp() (servertypes.ABCI, error) {
 	}
 
 	// check if we need to start the app or if we have a different app running
-	if !m.started || currentVersion.AppVersion != m.activeVersion.AppVersion {
+	if !m.appVersionChangedButShouldStillCommit && (!m.started || currentVersion.AppVersion > m.activeVersion.AppVersion) {
 		if err := m.startEmbeddedApp(currentVersion); err != nil {
 			return nil, fmt.Errorf("failed to start embedded app: %w", err)
 		}
 	}
 
-	m.logger.Info("Using ABCI remote connection", "maximum_app_version", currentVersion.AppVersion, "abci_version", currentVersion.ABCIVersion.String(), "chain_id", m.chainID)
-
-	switch currentVersion.ABCIVersion {
+	m.logger.Info("Using ABCI remote connection", "maximum_app_version", m.activeVersion.AppVersion, "abci_version", m.activeVersion.ABCIVersion.String(), "chain_id", m.chainID)
+	switch m.activeVersion.ABCIVersion {
 	case ABCIClientVersion1:
 		return NewRemoteABCIClientV1(m.conn, m.chainID), nil
 	case ABCIClientVersion2:
 		return NewRemoteABCIClientV2(m.conn), nil
 	}
 
-	return nil, fmt.Errorf("unknown ABCI client version %d", currentVersion.ABCIVersion)
+	return nil, fmt.Errorf("unknown ABCI client version %d", m.activeVersion.ABCIVersion)
 }
 
 // startEmbeddedApp starts an embedded version of the app.

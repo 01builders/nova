@@ -43,6 +43,11 @@ func (m *Multiplexer) Commit(context.Context, *abci.RequestCommit) (*abci.Respon
 	if err != nil {
 		return nil, fmt.Errorf("failed to get app for version %d: %w", m.lastAppVersion, err)
 	}
+
+	if m.appVersionChangedButShouldStillCommit {
+		m.appVersionChangedButShouldStillCommit = false
+	}
+
 	return app.Commit()
 }
 
@@ -68,6 +73,11 @@ func (m *Multiplexer) FinalizeBlock(_ context.Context, req *abci.RequestFinalize
 	// update the app version
 	m.lastAppVersion = resp.ConsensusParamUpdates.GetVersion().App
 
+	// app version has changed
+	if m.lastAppVersion > m.activeVersion.AppVersion {
+		m.appVersionChangedButShouldStillCommit = true
+	}
+	
 	return resp, err
 }
 
