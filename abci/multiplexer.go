@@ -4,7 +4,17 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/01builders/nova/internal"
+	"io"
+	"math"
+	"net"
+	"os"
+	"os/signal"
+	"path/filepath"
+	"strings"
+	"sync"
+	"syscall"
+
+	"cosmossdk.io/log"
 	cmtcfg "github.com/cometbft/cometbft/config"
 	"github.com/cometbft/cometbft/node"
 	"github.com/cometbft/cometbft/p2p"
@@ -19,26 +29,16 @@ import (
 	serverconfig "github.com/cosmos/cosmos-sdk/server/config"
 	servergrpc "github.com/cosmos/cosmos-sdk/server/grpc"
 	servercmtlog "github.com/cosmos/cosmos-sdk/server/log"
+	servertypes "github.com/cosmos/cosmos-sdk/server/types"
 	"github.com/cosmos/cosmos-sdk/telemetry"
 	"github.com/cosmos/cosmos-sdk/version"
 	"github.com/hashicorp/go-metrics"
 	"golang.org/x/sync/errgroup"
-	"google.golang.org/grpc/credentials/insecure"
-	"io"
-	"math"
-	"net"
-	"os"
-	"os/signal"
-	"path/filepath"
-	"strings"
-	"sync"
-	"syscall"
-
-	"cosmossdk.io/log"
-	servertypes "github.com/cosmos/cosmos-sdk/server/types"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
 
 	"github.com/01builders/nova/appd"
+	"github.com/01builders/nova/internal"
 )
 
 const (
@@ -253,8 +253,8 @@ func (m *Multiplexer) initRemoteGrpcConn() error {
 		tmAddress,
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
 		grpc.WithDefaultCallOptions(
-			grpc.MaxCallSendMsgSize(math.MaxInt),
-			grpc.MaxCallRecvMsgSize(math.MaxInt),
+			grpc.MaxCallSendMsgSize(math.MaxInt32),
+			grpc.MaxCallRecvMsgSize(math.MaxInt32),
 		),
 	)
 	if err != nil {
