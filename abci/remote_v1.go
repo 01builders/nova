@@ -2,7 +2,6 @@ package abci
 
 import (
 	"context"
-	"fmt"
 	"math"
 
 	"google.golang.org/grpc"
@@ -187,13 +186,6 @@ func (a *RemoteABCIClientV1) FinalizeBlock(req *abciv2.RequestFinalizeBlock) (*a
 	if err != nil {
 		return nil, err
 	}
-
-	fmt.Println(`commitResp
-	
-	
-	
-	
-	`, commitResp, "appHash", string(commitResp.Data))
 
 	// set the retain height, used in commit noop
 	a.commitRetainLastHeight = commitResp.RetainHeight
