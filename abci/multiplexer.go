@@ -58,7 +58,7 @@ type Multiplexer struct {
 
 	started       bool
 	appCreator    servertypes.AppCreator
-	latestApp     servertypes.Application
+	nativeApp     servertypes.Application
 	activeVersion Version
 	chainID       string
 
@@ -97,7 +97,7 @@ func NewMultiplexer(svrCtx *server.Context, svrCfg serverconfig.Config, clientCt
 		clientContext:  clientCtx,
 		appCreator:     appCreator,
 		logger:         svrCtx.Logger.With("multiplexer"),
-		latestApp:      nil, // app will be initialized if required by the multiplexer.
+		nativeApp:      nil, // app will be initialized if required by the multiplexer.
 		versions:       versions,
 		chainID:        chainID,
 		lastAppVersion: applicationVersion,
@@ -139,12 +139,12 @@ func (m *Multiplexer) Start() error {
 		}
 	}
 
-	if m.latestApp == nil {
+	if m.nativeApp == nil {
 		m.logger.Info("using embedded app, not continuing with grpc or api servers")
 		return m.g.Wait()
 	}
 
-	if err := m.enableGRPCAndAPIServers(m.latestApp); err != nil {
+	if err := m.enableGRPCAndAPIServers(m.nativeApp); err != nil {
 		return err
 	}
 
@@ -299,7 +299,7 @@ func (m *Multiplexer) startGRPCServer() (*grpc.Server, client.Context, error) {
 
 	m.clientContext = m.clientContext.WithGRPCClient(grpcClient)
 	m.logger.Debug("gRPC client assigned to client context", "target", m.svrCfg.GRPC.Address)
-	grpcSrv, err := servergrpc.NewGRPCServer(m.clientContext, m.latestApp, m.svrCfg.GRPC)
+	grpcSrv, err := servergrpc.NewGRPCServer(m.clientContext, m.nativeApp, m.svrCfg.GRPC)
 	if err != nil {
 		return nil, m.clientContext, err
 	}
@@ -317,14 +317,14 @@ func (m *Multiplexer) startGRPCServer() (*grpc.Server, client.Context, error) {
 
 // startAPIServer initializes and starts the API server, setting up routes, telemetry, and running it within an error group.
 func (m *Multiplexer) startAPIServer(grpcSrv *grpc.Server, metrics *telemetry.Metrics) error {
-	if m.latestApp == nil {
+	if m.nativeApp == nil {
 		return fmt.Errorf("unable to start api server, app is nil")
 	}
 
 	m.clientContext = m.clientContext.WithHomeDir(m.svrCtx.Config.RootDir)
 
 	apiSrv := api.New(m.clientContext, m.svrCtx.Logger.With(log.ModuleKey, "api-server"), grpcSrv)
-	m.latestApp.RegisterAPIRoutes(apiSrv, m.svrCfg.API)
+	m.nativeApp.RegisterAPIRoutes(apiSrv, m.svrCfg.API)
 
 	if m.svrCfg.Telemetry.Enabled {
 		apiSrv.SetTelemetry(metrics)
@@ -355,14 +355,14 @@ func (m *Multiplexer) startNativeApp() (servertypes.Application, error) {
 	}
 
 	m.logger.Info("creating native app", "app_version", m.lastAppVersion)
-	m.latestApp = m.appCreator(m.logger, db, traceWriter, m.svrCtx.Viper)
+	m.nativeApp = m.appCreator(m.logger, db, traceWriter, m.svrCtx.Viper)
 	m.started = true
 
 	m.registerCleanupFn(func() error {
-		return m.latestApp.Close()
+		return m.nativeApp.Close()
 	})
 
-	return m.latestApp, nil
+	return m.nativeApp, nil
 }
 
 func setupTraceWriter(svrCtx *server.Context) (traceWriter io.WriteCloser, cleanup func(), err error) {
@@ -419,7 +419,7 @@ func (m *Multiplexer) getApp() (servertypes.ABCI, error) {
 			return nil, fmt.Errorf("failed to stop active version: %w", err)
 		}
 
-		if m.latestApp == nil {
+		if m.nativeApp == nil {
 			m.logger.Info("no app found in multiplexer for app version, starting latest app", "app_version", m.lastAppVersion)
 			app, err := m.startNativeApp()
 			if err != nil {
@@ -435,7 +435,7 @@ func (m *Multiplexer) getApp() (servertypes.ABCI, error) {
 		}
 
 		m.logger.Info("using latest app", "app_version", m.lastAppVersion)
-		return m.latestApp, nil
+		return m.nativeApp, nil
 	}
 
 	// check if we need to start the app or if we have a different app running
@@ -490,7 +490,7 @@ func (m *Multiplexer) startEmbeddedApp(version Version) error {
 		}
 
 		if version.Appd.Pid() == appd.AppdStopped {
-			return fmt.Errorf("app for version %d failed to start", m.latestApp)
+			return fmt.Errorf("app for version %d failed to start", m.nativeApp)
 		}
 
 		m.activeVersion = version
@@ -557,7 +557,7 @@ func (m *Multiplexer) startCmtNode() error {
 	}
 
 	// no latest app set means an embedded app is being used.
-	if m.latestApp == nil {
+	if m.nativeApp == nil {
 		m.logger.Debug("using embedded app so registering remote app cleanup")
 		m.setupRemoteAppCleanup(m.Cleanup)
 	}

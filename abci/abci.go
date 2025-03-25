@@ -74,7 +74,7 @@ func (m *Multiplexer) FinalizeBlock(_ context.Context, req *abci.RequestFinalize
 	m.lastAppVersion = resp.ConsensusParamUpdates.GetVersion().App
 
 	// app version has changed
-	if m.lastAppVersion > m.activeVersion.AppVersion {
+	if m.nativeApp == nil && m.lastAppVersion > m.activeVersion.AppVersion {
 		m.appVersionChangedButShouldStillCommit = true
 	}
 
