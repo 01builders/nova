@@ -57,9 +57,10 @@ type Multiplexer struct {
 	svrCfg serverconfig.Config
 	// clientContext is used to configure the different services managed by the multiplexer.
 	clientContext client.Context
-	// lastAppVersion is the version number of the last application that has been used.
-	// this is updated based on the consensus params in FinalizeBlock.
-	lastAppVersion uint64
+	// appVersion is the current version application number.
+	appVersion uint64
+	// nextAppVersion this is updated based on the consensus params every FinalizeBlock.
+	nextAppVersion uint64
 	// started indicates if there is either an embedded app running, or a native one running.
 	started bool
 	// appCreator is a function type responsible for creating a new application instance.
@@ -85,10 +86,6 @@ type Multiplexer struct {
 	ctx context.Context
 	// g is the waitgroup to which the comet, grpc and api server init functions are added to.
 	g *errgroup.Group
-	// appVersionChangedButShouldStillCommit is set to true if the app version
-	// changed during the finalize block phase. This is used to ensure that the
-	// commit phase is executed with the correct app version.
-	appVersionChangedButShouldStillCommit bool
 }
 
 // NewVersions returns a list of versions sorted by app version.
@@ -107,16 +104,16 @@ func NewMultiplexer(svrCtx *server.Context, svrCfg serverconfig.Config, clientCt
 	}
 
 	mp := &Multiplexer{
-		svrCtx:         svrCtx,
-		svrCfg:         svrCfg,
-		clientContext:  clientCtx,
-		appCreator:     appCreator,
-		logger:         svrCtx.Logger.With("multiplexer"),
-		nativeApp:      nil, // app will be initialized if required by the multiplexer.
-		versions:       versions,
-		chainID:        chainID,
-		lastAppVersion: applicationVersion,
-		cleanupFns:     make([]func() error, 0),
+		svrCtx:        svrCtx,
+		svrCfg:        svrCfg,
+		clientContext: clientCtx,
+		appCreator:    appCreator,
+		logger:        svrCtx.Logger.With("multiplexer"),
+		nativeApp:     nil, // app will be initialized if required by the multiplexer.
+		versions:      versions,
+		chainID:       chainID,
+		appVersion:    applicationVersion,
+		cleanupFns:    make([]func() error, 0),
 	}
 
 	return mp, nil
@@ -212,7 +209,7 @@ func (m *Multiplexer) enableGRPCAndAPIServers(app servertypes.Application) error
 // startApp starts either the native app, or an embedded app.
 func (m *Multiplexer) startApp() error {
 	// prepare correct version
-	currentVersion, err := m.versions.GetForAppVersion(m.lastAppVersion)
+	currentVersion, err := m.versions.GetForAppVersion(m.appVersion)
 	if err != nil && errors.Is(err, ErrNoVersionFound) {
 		// no version found, assume latest
 		if _, err := m.startNativeApp(); err != nil {
@@ -220,12 +217,12 @@ func (m *Multiplexer) startApp() error {
 		}
 		return nil
 	} else if err != nil {
-		return fmt.Errorf("failed to get app for version %d: %w", m.lastAppVersion, err)
+		return fmt.Errorf("failed to get app for version %d: %w", m.appVersion, err)
 	}
 
 	// start the correct version
 	if currentVersion.Appd == nil {
-		return fmt.Errorf("appd is nil for version %d", m.lastAppVersion)
+		return fmt.Errorf("appd is nil for version %d", m.appVersion)
 	}
 
 	if currentVersion.Appd.Pid() == appd.AppdStopped {
@@ -367,7 +364,7 @@ func (m *Multiplexer) startNativeApp() (servertypes.Application, error) {
 		return nil, err
 	}
 
-	m.logger.Debug("creating native app", "app_version", m.lastAppVersion)
+	m.logger.Debug("creating native app", "app_version", m.appVersion)
 	m.nativeApp = m.appCreator(m.logger, db, traceWriter, m.svrCtx.Viper)
 	m.started = true
 
@@ -421,11 +418,11 @@ func (m *Multiplexer) getApp() (servertypes.ABCI, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	m.logger.Info("getting app", "app_version", m.lastAppVersion, "app_version_changed_but_should_still_commit", m.appVersionChangedButShouldStillCommit)
+	m.logger.Info("getting app", "app_version", m.appVersion, "next_app_version", m.nextAppVersion)
 
 	// get the appropriate version for the latest app version.
-	currentVersion, err := m.versions.GetForAppVersion(m.lastAppVersion)
-	if !m.appVersionChangedButShouldStillCommit && err != nil {
+	currentVersion, err := m.versions.GetForAppVersion(m.appVersion)
+	if err != nil {
 		// if we are switching from an embedded binary to a native one, we need to ensure that we stop it
 		// before we start the native app.
 		if err := m.stopActiveVersion(); err != nil {
@@ -433,7 +430,7 @@ func (m *Multiplexer) getApp() (servertypes.ABCI, error) {
 		}
 
 		if m.nativeApp == nil {
-			m.logger.Info("no app found in multiplexer for app version, starting latest app", "app_version", m.lastAppVersion)
+			m.logger.Info("no app found in multiplexer for app version, starting latest app", "app_version", m.appVersion)
 			app, err := m.startNativeApp()
 			if err != nil {
 				return nil, fmt.Errorf("failed to start latest app: %w", err)
@@ -447,13 +444,12 @@ func (m *Multiplexer) getApp() (servertypes.ABCI, error) {
 			}
 		}
 
-		m.logger.Info("using latest app", "app_version", m.lastAppVersion)
+		m.logger.Info("using latest app", "app_version", m.appVersion)
 		return m.nativeApp, nil
 	}
 
 	// check if we need to start the app or if we have a different app running
-	// TODO: currentVersion can be unintialized if appVersionChangedButShouldStillCommit is true.
-	if !m.appVersionChangedButShouldStillCommit && (!m.started || currentVersion.AppVersion > m.activeVersion.AppVersion) {
+	if !m.started || currentVersion.AppVersion > m.activeVersion.AppVersion {
 		if err := m.startEmbeddedApp(currentVersion); err != nil {
 			return nil, fmt.Errorf("failed to start embedded app: %w", err)
 		}
@@ -500,7 +496,7 @@ func (m *Multiplexer) startEmbeddedApp(version Version) error {
 
 		m.logger.Info("Starting app for version", "app_version", version.AppVersion, "args", version.GetStartArgs(programArgs))
 		if err := version.Appd.Start(version.GetStartArgs(programArgs)...); err != nil {
-			return fmt.Errorf("failed to start app for version %d: %w", m.lastAppVersion, err)
+			return fmt.Errorf("failed to start app for version %d: %w", m.appVersion, err)
 		}
 
 		if version.Appd.Pid() == appd.AppdStopped {
