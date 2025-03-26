@@ -446,7 +446,6 @@ func (m *Multiplexer) getApp() (servertypes.ABCI, error) {
 
 			// NOTE: we don't need to create a comet node as that will have been created when Start was called.
 
-			m.svrCfg.GRPC.Enable = true // TODO: cleaner way than just setting field.
 			if err := m.enableGRPCAndAPIServers(app); err != nil {
 				return nil, fmt.Errorf("failed to enable gRPC and API servers: %w", err)
 			}
