@@ -551,6 +551,7 @@ func consensusParamsV1ToV2(params *abciv1.ConsensusParams) *typesv2.ConsensusPar
 		consensusParamsV2.Evidence = &typesv2.EvidenceParams{
 			MaxAgeNumBlocks: evidenceParams.MaxAgeNumBlocks,
 			MaxAgeDuration:  evidenceParams.MaxAgeDuration,
+			MaxBytes:        evidenceParams.MaxBytes,
 		}
 	}
 
