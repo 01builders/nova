@@ -361,6 +361,18 @@ func (a *RemoteABCIClientV1) ProcessProposal(req *abciv2.RequestProcessProposal)
 		appVersion = infoResp.AppVersion
 	}
 
+	lastBlockId := typesv1.BlockID{}
+
+	if req.Header.LastBlockId.Hash != nil {
+		lastBlockId.Hash = req.Header.LastBlockId.Hash
+	}
+	if req.Header.LastBlockId.PartSetHeader.Hash != nil {
+		lastBlockId.PartSetHeader = typesv1.PartSetHeader{
+			Total: req.Header.LastBlockId.PartSetHeader.Total,
+			Hash:  req.Header.LastBlockId.PartSetHeader.Hash,
+		}
+	}
+
 	resp, err := a.ABCIApplicationClient.ProcessProposal(context.Background(), &abciv1.RequestProcessProposal{
 		Header: typesv1.Header{
 			Version: versionv1.Consensus{
@@ -373,6 +385,14 @@ func (a *RemoteABCIClientV1) ProcessProposal(req *abciv2.RequestProcessProposal)
 			NextValidatorsHash: req.NextValidatorsHash,
 			ProposerAddress:    req.ProposerAddress,
 			DataHash:           req.DataRootHash,
+
+			ConsensusHash:   req.Header.ConsensusHash,
+			AppHash:         req.Header.AppHash,
+			EvidenceHash:    req.Header.EvidenceHash,
+			ValidatorsHash:  req.Header.ValidatorsHash,
+			LastCommitHash:  req.Header.LastCommitHash,
+			LastResultsHash: req.Header.LastResultsHash,
+			LastBlockId:     lastBlockId,
 		},
 		BlockData: &typesv1.Data{
 			Txs:        req.Txs,
