@@ -9,6 +9,7 @@ import (
 	abciv2 "github.com/cometbft/cometbft/abci/types"
 	cryptov2 "github.com/cometbft/cometbft/proto/tendermint/crypto"
 	typesv2 "github.com/cometbft/cometbft/proto/tendermint/types"
+	"github.com/cometbft/cometbft/version"
 	abciv1 "github.com/tendermint/tendermint/abci/types"
 	cryptov1 "github.com/tendermint/tendermint/proto/tendermint/crypto"
 	typesv1 "github.com/tendermint/tendermint/proto/tendermint/types"
@@ -118,7 +119,7 @@ func (a *RemoteABCIClientV1) FinalizeBlock(req *abciv2.RequestFinalizeBlock) (*a
 		Header: typesv1.Header{
 			ChainID: a.chainID,
 			Version: versionv1.Consensus{
-				Block: 11,
+				Block: version.BlockProtocol,
 				App:   appVersion,
 			},
 			Height:             req.Height,
@@ -376,7 +377,7 @@ func (a *RemoteABCIClientV1) ProcessProposal(req *abciv2.RequestProcessProposal)
 	resp, err := a.ABCIApplicationClient.ProcessProposal(context.Background(), &abciv1.RequestProcessProposal{
 		Header: typesv1.Header{
 			Version: versionv1.Consensus{
-				Block: 11,
+				Block: version.BlockProtocol,
 				App:   appVersion,
 			},
 			ChainID:            a.chainID,
