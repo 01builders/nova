@@ -83,6 +83,7 @@ versions, err := abci.NewVersions(abci.Version{
  ABCIVersion: abci.ABCIClientVersion1,
  AppVersion:  3,
  StartArgs: []string{
+  "--grpc.address=0.0.0.0:9090",
   "--grpc.enable=false",
   "--api.enable=false",
   "--api.swagger=false",
@@ -95,8 +96,8 @@ versions, err := abci.NewVersions(abci.Version{
 The default list of flags, unless overridden is the following:
 
 ```go
-"--grpc.enable=true",
-"--api.enable=true",
+"--grpc.enable",
+"--api.enable",
 "--api.swagger=false",
 "--with-tendermint=false",
 "--transport=grpc",
