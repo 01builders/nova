@@ -71,7 +71,7 @@ rootCommand.AddCommand(
 )
 ```
 
-## Customizing the embeedded binaries
+## Customizing the embedded binaries
 
 As `nova` manages the start and stop of embedded binaries and the connection between the standalone app <-> `nova` <-> CometBFT instance, it is important to ensure that the embedded binaries are properly started.
 
@@ -103,7 +103,7 @@ The default list of flags, unless overridden is the following:
 ```
 
 Note: Flags passed when starting the application are passed down to each embedded binary. `Nova` then adds the extra flags.
-For instance, when calling `appd start --force-no-bbr`, the native apps runs with only `--force-no-bbr` flag, while the embedded app runs with `--force-no-bbr` and the default flags.
+For instance, when calling `appd start --force-no-bbr`, the native app runs with only `--force-no-bbr` flag, while the embedded app runs with `--force-no-bbr` and the default flags.
 
 Note 2: The remote clients work via `gRPC` connection, when overriding the start flags, please always make sure to include `with-tendermint-false` / `with-comet=false` and `--transport=grpc` in the list of flags.
 
@@ -137,5 +137,5 @@ This can be done with minimal changes in Cosmos SDK mainline, but wasn't require
 
 The current alternative to `nova` is [`cosmovisor`](https://docs.cosmos.network/main/build/tooling/cosmovisor).
 
-`Cosmovisor`, simplifies the upgrade process by automatically switching the whole binary at the upgrade height. However node operators need, in addition, to download the new binary, add it to `cosmovisor`. Additionally, `cosmovisor` restart the whole binary, including the consensus layer, which can lead to P2P disruption and a longer downtime for the node operators.
+`Cosmovisor` simplifies the upgrade process by automatically switching the whole binary at the upgrade height. However, node operators need, in addition, to download the new binary and add it to `cosmovisor`. Additionally, `cosmovisor` restarts the whole binary, including the consensus layer, which can lead to P2P disruption and a longer downtime for the node operators.
 `Cosmovisor` is a great tool, but it is not the best solution for all chains. `Nova` is designed to be a more flexible and powerful solution for upgrading Cosmos SDK-based chains.
