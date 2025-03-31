@@ -92,7 +92,7 @@ versions, err := abci.NewVersions(abci.Version{
 })
 ```
 
-The default list of flags, unless overriden is the following:
+The default list of flags, unless overridden is the following:
 
 ```go
 "--grpc.enable=true",
