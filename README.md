@@ -32,9 +32,15 @@ Nova has two remote clients, those remote clients interact with the App and Come
 - `RemoteABCIClientV1`: This client is used for CometBFT v0.34 and below. It uses the `ABCIClientVersion` 1.
 - `RemoteABCIClientV2`: This client is used for CometBFT v0.38 and above. It uses the `ABCIClientVersion` 2.
 
-A chain defines a list of versions per `AppVersion` up until the last one:
+A chain defines a list of versions per `AppVersion` up until the last one.
+The `Appd` field a slice of `[]byte` which holds a compressed archive of the binary (`tar.gz`). This archive is umcompressed and extracted to a temporary directory, which is then used to start the embedded binary.
 
 ```go
+ v3, err := appd.New("v3", v3AppBinary)
+ if err != nil {
+  panic(err)
+ }
+
 versions, err := abci.NewVersions(abci.Version{
  Appd:        v3,
  ABCIVersion: abci.ABCIClientVersion1,
