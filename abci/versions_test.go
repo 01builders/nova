@@ -3,10 +3,60 @@ package abci
 import (
 	"errors"
 	"fmt"
-	"testing"
-
 	"github.com/stretchr/testify/require"
+	"testing"
 )
+
+func TestGetStartArgs(t *testing.T) {
+	defaults := defaultArgs()
+
+	tests := []struct {
+		name      string
+		version   Version
+		inputArgs []string
+		expected  []string
+	}{
+		{
+			name: "Version with custom start args",
+			version: Version{
+				StartArgs: []string{"--custom-flag", "--another-flag"},
+			},
+			inputArgs: []string{"--existing-flag"},
+			expected:  []string{"--existing-flag", "--custom-flag", "--another-flag"},
+		},
+		{
+			name: "Version with empty start args",
+			version: Version{
+				StartArgs: []string{},
+			},
+			inputArgs: []string{"--input-arg"},
+			expected:  append([]string{"--input-arg"}, defaults...),
+		},
+		{
+			name: "Version with no start args provided (nil slice)",
+			version: Version{
+				StartArgs: nil,
+			},
+			inputArgs: []string{},
+			expected:  defaults,
+		},
+		{
+			name: "Version with input args but no custom start args",
+			version: Version{
+				StartArgs: nil,
+			},
+			inputArgs: []string{"--new-arg"},
+			expected:  append([]string{"--new-arg"}, defaults...),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := tt.version.GetStartArgs(tt.inputArgs)
+			require.Equal(t, tt.expected, result, "unexpected result for %s", tt.name)
+		})
+	}
+}
 
 func TestGetForAppVersion(t *testing.T) {
 	tests := []struct {

@@ -71,15 +71,19 @@ func (v Version) GetStartArgs(args []string) []string {
 	if len(v.StartArgs) > 0 {
 		return append(args, v.StartArgs...)
 	}
+	return append(args, defaultArgs()...)
+}
 
-	// Default flags for standalone apps.
-	return append(args,
+// defaultArgs returns a slice of default flags for standalone apps.
+func defaultArgs() []string {
+	return []string{
 		"--grpc.enable",
+		"--grpc.address=0.0.0.0:9090",
 		"--api.enable",
 		"--api.swagger=false",
 		"--with-tendermint=false",
 		"--transport=grpc",
-	)
+	}
 }
 
 // Validate checks for duplicate app versions in a slice of Versions.
