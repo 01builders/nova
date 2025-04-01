@@ -99,19 +99,44 @@ func (a *RemoteABCIClientV1) FinalizeBlock(req *abciv2.RequestFinalizeBlock) (*a
 		appVersion = infoResp.AppVersion
 	}
 
+	lastBlockId := typesv1.BlockID{}
+
+	if req.Header.LastBlockId.Hash != nil {
+		lastBlockId.Hash = req.Header.LastBlockId.Hash
+	}
+	if req.Header.LastBlockId.PartSetHeader.Hash != nil {
+		lastBlockId.PartSetHeader = typesv1.PartSetHeader{
+			Total: req.Header.LastBlockId.PartSetHeader.Total,
+			Hash:  req.Header.LastBlockId.PartSetHeader.Hash,
+		}
+	}
+
+	commitInfo := commitInfoV2ToV1(&req.DecidedLastCommit)
+
 	beginBlockResp, err := a.ABCIApplicationClient.BeginBlock(context.Background(), &abciv1.RequestBeginBlock{
 		Hash: req.Hash,
 		Header: typesv1.Header{
 			ChainID: a.chainID,
 			Version: versionv1.Consensus{
-				App: appVersion,
+				Block: 11,
+				App:   appVersion,
 			},
 			Height:             req.Height,
 			Time:               req.Time,
 			NextValidatorsHash: req.NextValidatorsHash,
 			ProposerAddress:    req.ProposerAddress,
+			LastBlockId:        lastBlockId,
+
+			// needed for v3 sync
+			DataHash:        req.Header.DataHash,
+			LastResultsHash: req.Header.LastResultsHash,
+			LastCommitHash:  req.Header.LastCommitHash,
+			ValidatorsHash:  req.Header.ValidatorsHash,
+			ConsensusHash:   req.Header.ConsensusHash,
+			AppHash:         req.Header.AppHash,
+			EvidenceHash:    req.Header.EvidenceHash,
 		},
-		LastCommitInfo:      commitInfoV2ToV1(&req.DecidedLastCommit),
+		LastCommitInfo:      commitInfo,
 		ByzantineValidators: evidenceV2ToV1(req.Misbehavior),
 	}, grpc.WaitForReady(true))
 	if err != nil {
@@ -336,10 +361,23 @@ func (a *RemoteABCIClientV1) ProcessProposal(req *abciv2.RequestProcessProposal)
 		appVersion = infoResp.AppVersion
 	}
 
+	lastBlockId := typesv1.BlockID{}
+
+	if req.Header.LastBlockId.Hash != nil {
+		lastBlockId.Hash = req.Header.LastBlockId.Hash
+	}
+	if req.Header.LastBlockId.PartSetHeader.Hash != nil {
+		lastBlockId.PartSetHeader = typesv1.PartSetHeader{
+			Total: req.Header.LastBlockId.PartSetHeader.Total,
+			Hash:  req.Header.LastBlockId.PartSetHeader.Hash,
+		}
+	}
+
 	resp, err := a.ABCIApplicationClient.ProcessProposal(context.Background(), &abciv1.RequestProcessProposal{
 		Header: typesv1.Header{
 			Version: versionv1.Consensus{
-				App: appVersion,
+				Block: 11,
+				App:   appVersion,
 			},
 			ChainID:            a.chainID,
 			Height:             req.Height,
@@ -347,6 +385,14 @@ func (a *RemoteABCIClientV1) ProcessProposal(req *abciv2.RequestProcessProposal)
 			NextValidatorsHash: req.NextValidatorsHash,
 			ProposerAddress:    req.ProposerAddress,
 			DataHash:           req.DataRootHash,
+
+			ConsensusHash:   req.Header.ConsensusHash,
+			AppHash:         req.Header.AppHash,
+			EvidenceHash:    req.Header.EvidenceHash,
+			ValidatorsHash:  req.Header.ValidatorsHash,
+			LastCommitHash:  req.Header.LastCommitHash,
+			LastResultsHash: req.Header.LastResultsHash,
+			LastBlockId:     lastBlockId,
 		},
 		BlockData: &typesv1.Data{
 			Txs:        req.Txs,
@@ -563,7 +609,7 @@ func commitInfoV2ToV1(info *abciv2.CommitInfo) abciv1.LastCommitInfo {
 				Address: vote.Validator.Address,
 				Power:   vote.Validator.Power,
 			},
-			SignedLastBlock: vote.BlockIdFlag == typesv2.BlockIDFlagCommit,
+			SignedLastBlock: vote.BlockIdFlag != typesv2.BlockIDFlagAbsent,
 		})
 	}
 	return abciv1.LastCommitInfo{

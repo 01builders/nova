@@ -74,8 +74,8 @@ func (v Version) GetStartArgs(args []string) []string {
 
 	// Default flags for standalone apps.
 	return append(args,
-		"--grpc.enable=true",
-		"--api.enable=true",
+		"--grpc.enable",
+		"--api.enable",
 		"--api.swagger=false",
 		"--with-tendermint=false",
 		"--transport=grpc",
