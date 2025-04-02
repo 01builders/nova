@@ -1,7 +1,7 @@
 # Improved Cosmos SDK Upgrading System
 
 This repository contains an improved Cosmos SDK Upgrading system (codename: `nova`).
-Sync from genesis or upgrade a Cosmos SDK chain seemlessly for the node operators, without binary switch.
+Sync from genesis or upgrade a Cosmos SDK chain seamlessly for the node operators, without binary switch.
 
 ## Features
 
@@ -54,7 +54,7 @@ Once the `AppVersion` changes, `nova` takes the best matching embedded binary (u
 
 ## Installation
 
-`Nova` integrates seemlessly in any Cosmos SDK chain. It simply replaces the `StartCommandHandler` of the chain:
+`Nova` integrates seamlessly in any Cosmos SDK chain. It simply replaces the `StartCommandHandler` of the chain:
 
 ```diff
 server.AddCommandsWithStartCmdOptions(
@@ -116,7 +116,7 @@ Note 2: The remote clients work via `gRPC` connection, when overriding the start
 
 ## Passthrough mode
 
-Passtrough mode is an optional command that can be added to a chain.
+Passthrough mode is an optional command that can be added to a chain.
 It allows an user to interact via an embedded binary via CLI.
 
 ```bash
