@@ -1,6 +1,5 @@
-:::tip
-Nova has been moved to [celestia-app](https://github.com/celestiaorg/celestia-app) under its own go module. Nova follows [celestia-app license](https://github.com/celestiaorg/celestia-app/blob/main/LICENSE) (Apache 2.0).
-:::
+> [!IMPORTANT]
+> Nova has been moved to [celestia-app](https://github.com/celestiaorg/celestia-app) under its own go module. Nova follows [celestia-app license](https://github.com/celestiaorg/celestia-app/blob/main/LICENSE) (Apache 2.0).
 
 ---
 
