@@ -1,3 +1,8 @@
+> [!IMPORTANT]
+> Nova has been moved to [celestia-app](https://github.com/celestiaorg/celestia-app/tree/main/multiplexer) under its own go module. Nova follows [celestia-app license](https://github.com/celestiaorg/celestia-app/blob/main/LICENSE) (Apache 2.0).
+
+---
+
 # Improved Cosmos SDK Upgrading System
 
 This repository contains an improved Cosmos SDK Upgrading system (codename: `nova`).
